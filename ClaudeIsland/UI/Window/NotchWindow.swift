@@ -58,7 +58,7 @@ class NotchPanel: NSPanel {
         ignoresMouseEvents = true
 
         isReleasedWhenClosed = true
-        acceptsMouseMovedEvents = false
+        acceptsMouseMovedEvents = true
     }
 
     override var canBecomeKey: Bool { true }
