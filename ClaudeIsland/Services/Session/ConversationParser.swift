@@ -121,11 +121,25 @@ actor ConversationParser {
             let isMeta = json["isMeta"] as? Bool ?? false
 
             if type == "user" && !isMeta {
-                if let message = json["message"] as? [String: Any],
-                   let msgContent = message["content"] as? String {
-                    if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
-                        firstUserMessage = Self.truncateMessage(msgContent, maxLength: 50)
-                        break
+                if let message = json["message"] as? [String: Any] {
+                    // Handle string content
+                    if let msgContent = message["content"] as? String {
+                        if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
+                            firstUserMessage = Self.truncateMessage(msgContent, maxLength: 50)
+                            break
+                        }
+                    }
+                    // Handle array content (Claude Code sends [{type: "text", text: "..."}])
+                    else if let contentArray = message["content"] as? [[String: Any]] {
+                        for block in contentArray {
+                            if let blockType = block["type"] as? String, blockType == "text",
+                               let text = block["text"] as? String,
+                               !text.hasPrefix("<command-name>") && !text.hasPrefix("<local-command") && !text.hasPrefix("Caveat:") {
+                                firstUserMessage = Self.truncateMessage(text, maxLength: 50)
+                                break
+                            }
+                        }
+                        if firstUserMessage != nil { break }
                     }
                 }
             }
@@ -175,13 +189,26 @@ actor ConversationParser {
             if !foundLastUserMessage && type == "user" {
                 let isMeta = json["isMeta"] as? Bool ?? false
                 if !isMeta, let message = json["message"] as? [String: Any] {
+                    var hasUserText = false
                     if let msgContent = message["content"] as? String {
                         if !msgContent.hasPrefix("<command-name>") && !msgContent.hasPrefix("<local-command") && !msgContent.hasPrefix("Caveat:") {
-                            if let timestampStr = json["timestamp"] as? String {
-                                lastUserMessageDate = formatter.date(from: timestampStr)
-                            }
-                            foundLastUserMessage = true
+                            hasUserText = true
                         }
+                    } else if let contentArray = message["content"] as? [[String: Any]] {
+                        for block in contentArray {
+                            if let blockType = block["type"] as? String, blockType == "text",
+                               let text = block["text"] as? String,
+                               !text.hasPrefix("<command-name>") && !text.hasPrefix("<local-command") && !text.hasPrefix("Caveat:") {
+                                hasUserText = true
+                                break
+                            }
+                        }
+                    }
+                    if hasUserText {
+                        if let timestampStr = json["timestamp"] as? String {
+                            lastUserMessageDate = formatter.date(from: timestampStr)
+                        }
+                        foundLastUserMessage = true
                     }
                 }
             }
