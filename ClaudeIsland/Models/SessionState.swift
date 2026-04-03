@@ -204,33 +204,58 @@ struct SessionState: Equatable, Identifiable, Sendable {
 
         let lines = content.components(separatedBy: "\n").filter { !$0.isEmpty }
 
-        // Scan LAST user message (most recent, from end of file)
+        // Scan from end: find last user message + last assistant text
         var lastUserMsg: String?
+        var lastAssistantMsg: String?
+
         for line in lines.reversed().prefix(500) {
             guard let ld = line.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: ld) as? [String: Any],
-                  json["type"] as? String == "user",
+                  let type = json["type"] as? String,
                   !(json["isMeta"] as? Bool ?? false),
                   let msg = json["message"] as? [String: Any] else { continue }
 
-            if let c = msg["content"] as? String, !c.hasPrefix("<command-name>"), !c.hasPrefix("<local-command"), !c.hasPrefix("Caveat:") {
-                lastUserMsg = String(c.prefix(60))
-                break
+            let text = Self.extractText(from: msg)
+            guard let t = text else { continue }
+
+            if type == "assistant" && lastAssistantMsg == nil {
+                lastAssistantMsg = String(t.prefix(80))
             }
-            if let arr = msg["content"] as? [[String: Any]] {
-                for b in arr {
-                    if b["type"] as? String == "text",
-                       let t = b["text"] as? String,
-                       !t.hasPrefix("<command-name>"), !t.hasPrefix("<local-command"), !t.hasPrefix("Caveat:") {
-                        lastUserMsg = String(t.prefix(60))
-                        break
-                    }
-                }
-                if lastUserMsg != nil { break }
+            if type == "user" && lastUserMsg == nil {
+                lastUserMsg = String(t.prefix(40))
             }
+            if lastUserMsg != nil && lastAssistantMsg != nil { break }
         }
 
+        // Build summary: "你: [question] → [claude reply]"
+        if let user = lastUserMsg, let assistant = lastAssistantMsg {
+            let userPart = user.count > 30 ? String(user.prefix(30)) + "..." : user
+            let assistPart = assistant.count > 50 ? String(assistant.prefix(50)) + "..." : assistant
+            return "\(userPart)\n\(assistPart)"
+        }
+        if let assistant = lastAssistantMsg {
+            return assistant
+        }
         return lastUserMsg
+    }
+
+    /// Extract text content from a message (handles both String and Array formats)
+    private static func extractText(from msg: [String: Any]) -> String? {
+        if let c = msg["content"] as? String,
+           !c.hasPrefix("<command-name>"), !c.hasPrefix("<local-command"), !c.hasPrefix("Caveat:") {
+            return c
+        }
+        if let arr = msg["content"] as? [[String: Any]] {
+            for b in arr {
+                if b["type"] as? String == "text",
+                   let t = b["text"] as? String,
+                   !t.hasPrefix("<command-name>"), !t.hasPrefix("<local-command"), !t.hasPrefix("Caveat:"),
+                   !t.hasPrefix("[Request interrupted") {
+                    return t
+                }
+            }
+        }
+        return nil
     }
 
     /// Best hint for matching window title
