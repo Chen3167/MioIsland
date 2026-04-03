@@ -125,6 +125,22 @@ class ClaudeSessionMonitor: ObservableObject {
     private func updateFromSessions(_ sessions: [SessionState]) {
         instances = sessions
         pendingInstances = sessions.filter { $0.needsAttention }
+
+        // Eagerly parse conversationInfo for sessions missing it
+        for session in sessions where session.conversationInfo.firstUserMessage == nil {
+            Task {
+                let info = await ConversationParser.shared.parse(
+                    sessionId: session.sessionId,
+                    cwd: session.cwd
+                )
+                if info.firstUserMessage != nil {
+                    await SessionStore.shared.updateConversationInfo(
+                        sessionId: session.sessionId,
+                        info: info
+                    )
+                }
+            }
+        }
     }
 
     // MARK: - History Loading (for UI)

@@ -112,6 +112,14 @@ actor SessionStore {
         publishState()
     }
 
+    /// Update conversationInfo for a session (called from ClaudeSessionMonitor)
+    func updateConversationInfo(sessionId: String, info: ConversationInfo) {
+        guard var session = sessions[sessionId] else { return }
+        session.conversationInfo = info
+        sessions[sessionId] = session
+        publishState()
+    }
+
     // MARK: - Hook Event Processing
 
     private func processHookEvent(_ event: HookEvent) async {
