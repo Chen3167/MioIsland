@@ -42,7 +42,7 @@ final class ServerConnection: ObservableObject {
     var onRpcCall: ((String, String, @escaping (String) -> Void) -> Void)?
 
     /// Called when a user message arrives from another device (phone)
-    var onUserMessage: ((String, String) -> Void)?  // (serverSessionId, messageText)
+    var onUserMessage: ((String, String, String?, String?) -> Void)?  // (serverSessionId, messageText, claudeUuid, cwd)
 
     var isConnected: Bool { state == .connected }
 
@@ -108,7 +108,7 @@ final class ServerConnection: ObservableObject {
         manager = SocketManager(socketURL: url, config: [
             .log(false),
             .path("/v1/updates"),
-            .connectParams(["token": token, "clientType": "session-scoped"]),
+            .connectParams(["token": token, "clientType": "user-scoped"]),
             .reconnects(true),
             .reconnectWait(1),
             .reconnectWaitMax(5),
@@ -167,10 +167,13 @@ final class ServerConnection: ObservableObject {
                 // Skip non-user messages (don't echo our own synced messages)
                 if msgType != "user" { return }
             }
+            let sessionTag = dict["sessionTag"] as? String
+            let sessionPath = dict["sessionPath"] as? String
+
             // Plain text = message from phone (not JSON-serialized by MessageRelay)
             Task { @MainActor in
                 Self.logger.info("Received user message from phone for session \(sessionId.prefix(8))...")
-                self?.onUserMessage?(sessionId, content)
+                self?.onUserMessage?(sessionId, content, sessionTag, sessionPath)
             }
         }
 
@@ -206,6 +209,26 @@ final class ServerConnection: ObservableObject {
     func sendSessionEnd(sessionId: String) {
         guard isConnected else { return }
         socket?.emit("session-end", ["sid": sessionId] as [String: Any])
+    }
+
+    /// Ack successful consumption of a blob so the server can delete it immediately.
+    func sendBlobConsumed(blobId: String) {
+        guard isConnected else { return }
+        socket?.emit("blob-consumed", ["blobId": blobId] as [String: Any])
+    }
+
+    /// Download a blob by ID. Returns (data, mime) or throws.
+    func downloadBlob(blobId: String) async throws -> (Data, String) {
+        guard let token else { throw URLError(.userAuthenticationRequired) }
+        var request = URLRequest(url: URL(string: "\(serverUrl)/v1/blobs/\(blobId)")!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw NSError(domain: "CodeIsland.Blob", code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                          userInfo: [NSLocalizedDescriptionKey: "Blob download failed"])
+        }
+        let mime = (http.value(forHTTPHeaderField: "Content-Type") ?? "image/jpeg").split(separator: ";").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? "image/jpeg"
+        return (data, mime)
     }
 
     /// Update session metadata

@@ -25,6 +25,36 @@ final class SyncManager: ObservableObject {
     private var relay: MessageRelay?
     private var rpcExecutor: RPCExecutor?
 
+    /// Text the phone injected into a Claude session via cmux. Used so MessageRelay
+    /// can skip re-uploading the same text when it re-appears in the JSONL (dedup).
+    /// Keyed by Claude session UUID; entries expire after 60s.
+    private var recentlyInjected: [String: [(text: String, at: Date)]] = [:]
+
+    func recordPhoneInjection(claudeUuid: String, text: String) {
+        pruneInjections()
+        recentlyInjected[claudeUuid, default: []].append((text, Date()))
+    }
+
+    /// Returns true and removes the entry if `text` was recently injected from phone.
+    func consumePhoneInjection(claudeUuid: String, text: String) -> Bool {
+        pruneInjections()
+        guard var list = recentlyInjected[claudeUuid] else { return false }
+        if let idx = list.firstIndex(where: { $0.text == text }) {
+            list.remove(at: idx)
+            recentlyInjected[claudeUuid] = list.isEmpty ? nil : list
+            return true
+        }
+        return false
+    }
+
+    private func pruneInjections() {
+        let cutoff = Date().addingTimeInterval(-60)
+        for (k, v) in recentlyInjected {
+            let kept = v.filter { $0.at > cutoff }
+            recentlyInjected[k] = kept.isEmpty ? nil : kept
+        }
+    }
+
     /// The server URL to connect to. Stored in UserDefaults.
     var serverUrl: String? {
         get { UserDefaults.standard.string(forKey: "codelight-server-url") }
@@ -62,9 +92,9 @@ final class SyncManager: ObservableObject {
             conn.connect()
 
             // Handle messages from phone → type into terminal
-            conn.onUserMessage = { [weak self] serverSessionId, messageText in
+            conn.onUserMessage = { [weak self] serverSessionId, messageText, claudeUuid, cwd in
                 Task { @MainActor in
-                    await self?.handlePhoneMessage(serverSessionId: serverSessionId, text: messageText)
+                    await self?.handlePhoneMessage(serverSessionId: serverSessionId, text: messageText, claudeUuid: claudeUuid, cwd: cwd)
                 }
             }
 
@@ -100,28 +130,90 @@ final class SyncManager: ObservableObject {
         }
     }
 
-    /// Handle a user message received from the phone — type it into the matching terminal
-    private func handlePhoneMessage(serverSessionId: String, text: String) async {
-        // Find the matching local session by checking relay's serverSessionIds
-        // For now, find any active session and send to it
+    /// Handle a user message received from the phone — type it into the matching terminal.
+    /// Tries the locally tracked SessionState first; falls back to direct cmux lookup
+    /// using the Claude UUID/path the server provides (so dormant sessions still work).
+    private func handlePhoneMessage(serverSessionId: String, text: String, claudeUuid: String?, cwd: String?) async {
         let sessions = await SessionStore.shared.currentSessions()
+        let localId = self.relay?.localSessionId(forServerId: serverSessionId)
+        let preview = String(text.prefix(200))
+        Self.logger.info("handlePhoneMessage: serverId=\(serverSessionId, privacy: .public) localId=\(localId ?? "nil", privacy: .public) tag=\(claudeUuid ?? "nil", privacy: .public) cwd=\(cwd ?? "nil", privacy: .public) raw=\(preview, privacy: .public)")
 
-        // Try to find session matching the server ID via relay's mapping
-        if let relay = self.relay, let localId = relay.localSessionId(forServerId: serverSessionId) {
-            if let session = sessions.first(where: { $0.sessionId == localId }) {
-                let sent = await TerminalWriter.shared.sendText(text, to: session)
-                Self.logger.info("Phone message → terminal: \(sent ? "success" : "failed")")
+        // Parse the message content — it may be plain text OR a JSON envelope with images.
+        let (parsedText, imageBlobIds) = parseMessagePayload(text)
+        Self.logger.info("parsed: text=\(parsedText.prefix(80), privacy: .public) blobCount=\(imageBlobIds.count)")
+
+        // Resolve which Claude UUID we're actually targeting for dedup & image routing.
+        let targetUuid: String?
+        if let localId, sessions.contains(where: { $0.sessionId == localId }) {
+            targetUuid = localId
+        } else if let claudeUuid {
+            targetUuid = claudeUuid
+        } else {
+            targetUuid = nil
+        }
+
+        // Image path: download blobs and paste via NSPasteboard + Cmd+V
+        if !imageBlobIds.isEmpty {
+            guard let targetUuid, let connection = self.connection else {
+                Self.logger.warning("Phone image message dropped: no target uuid")
+                return
+            }
+            var images: [Data] = []
+            for blobId in imageBlobIds {
+                do {
+                    let (data, _) = try await connection.downloadBlob(blobId: blobId)
+                    images.append(data)
+                    // Ack so the server can delete the blob immediately
+                    connection.sendBlobConsumed(blobId: blobId)
+                } catch {
+                    Self.logger.error("Failed to download blob \(blobId): \(error.localizedDescription)")
+                }
+            }
+            if images.isEmpty {
+                Self.logger.warning("No images could be downloaded — falling back to text-only")
+            } else {
+                let ok = await TerminalWriter.shared.sendImagesAndText(images: images, text: parsedText, claudeUuid: targetUuid)
+                if ok { recordPhoneInjection(claudeUuid: targetUuid, text: parsedText) }
+                Self.logger.info("Phone message with \(images.count) image(s) → terminal: \(ok ? "success" : "failed")")
                 return
             }
         }
 
-        // Fallback: send to first active session
-        if let session = sessions.first(where: { $0.phase != .ended }) {
-            let sent = await TerminalWriter.shared.sendText(text, to: session)
-            Self.logger.info("Phone message → terminal (fallback): \(sent ? "success" : "failed")")
-        } else {
-            Self.logger.warning("No active session to send phone message to")
+        // Text-only path
+        // Path 1: locally tracked session
+        if let localId, let session = sessions.first(where: { $0.sessionId == localId }) {
+            let sent = await TerminalWriter.shared.sendText(parsedText, to: session)
+            if sent { recordPhoneInjection(claudeUuid: session.sessionId, text: parsedText) }
+            Self.logger.info("Phone message → terminal (tracked): \(sent ? "success" : "failed")")
+            return
         }
+
+        // Path 2: not tracked locally — use server-provided UUID + cwd to find cmux workspace directly
+        if let uuid = claudeUuid {
+            let sent = await TerminalWriter.shared.sendTextDirect(parsedText, claudeUuid: uuid, cwd: cwd)
+            if sent { recordPhoneInjection(claudeUuid: uuid, text: parsedText) }
+            Self.logger.info("Phone message → terminal (direct uuid): \(sent ? "success" : "failed")")
+            return
+        }
+
+        Self.logger.warning("Phone message dropped: no local session and no uuid for serverId=\(serverSessionId, privacy: .public)")
+    }
+
+    /// Extract `text` and `images[].blobId` from a message content string. If the content
+    /// isn't a JSON object, treat it as plain text with no images.
+    private func parseMessagePayload(_ content: String) -> (text: String, blobIds: [String]) {
+        guard let data = content.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return (content, [])
+        }
+        let text = dict["text"] as? String ?? ""
+        var blobIds: [String] = []
+        if let images = dict["images"] as? [[String: Any]] {
+            blobIds = images.compactMap { $0["blobId"] as? String }
+        }
+        return (text, blobIds)
     }
 
     func disconnectFromServer() {

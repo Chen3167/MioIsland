@@ -241,16 +241,25 @@ final class MessageRelay {
         let newItems = Array(items.dropFirst(syncedCount))
         syncedItemCounts[localId] = items.count
 
+        var sentCount = 0
         for item in newItems {
+            // Dedup: skip user messages that the phone just injected via cmux — they'd
+            // otherwise round-trip back to the phone as a second copy.
+            if case .user(let text) = item.type,
+               SyncManager.shared.consumePhoneInjection(claudeUuid: localId, text: text) {
+                Self.logger.info("Skipping echo of phone-injected user message")
+                continue
+            }
             let content = serializeChatItem(item)
             connection.sendMessage(
                 sessionId: serverId,  // Use server's session ID, not local
                 content: content,
                 localId: item.id
             )
+            sentCount += 1
         }
 
-        Self.logger.info("Synced \(newItems.count) new messages for \(localId.prefix(8))...")
+        Self.logger.info("Synced \(sentCount)/\(newItems.count) new messages for \(localId.prefix(8))...")
     }
 
     /// Serialize a ChatHistoryItem to a JSON string for the server.
