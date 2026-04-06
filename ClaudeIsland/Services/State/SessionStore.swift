@@ -908,6 +908,7 @@ actor SessionStore {
     /// Check all non-ended sessions for dead processes
     func scanForZombies() {
         var changed = false
+        var zombieSessionIds: [String] = []
         for (sessionId, session) in sessions {
             guard session.phase != .ended else { continue }
             guard let pid = session.pid else { continue }
@@ -915,10 +916,19 @@ actor SessionStore {
                 Self.logger.info("Zombie detected: session \(sessionId.prefix(8), privacy: .public) PID \(pid) is dead")
                 sessions[sessionId]?.phase = .ended
                 cancelPendingSync(sessionId: sessionId)
+                zombieSessionIds.append(sessionId)
                 changed = true
             }
         }
         if changed {
+            // Clean up HookSocketServer pending permissions and interrupt watchers
+            // (mirrors the cleanup that normal Stop/ended hook events perform)
+            for sessionId in zombieSessionIds {
+                HookSocketServer.shared.cancelPendingPermissions(sessionId: sessionId)
+                Task { @MainActor in
+                    InterruptWatcherManager.shared.stopWatching(sessionId: sessionId)
+                }
+            }
             publishState()
         }
     }
