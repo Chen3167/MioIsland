@@ -26,7 +26,22 @@ class ScreenObserver {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.onScreenChange()
+            // The notification queue is `.main`, so the callback
+            // runs on the main thread at runtime. Swift's strict
+            // concurrency checker doesn't know that statically,
+            // so we state-of-fact it via MainActor.assumeIsolated
+            // before touching the MainActor-isolated store.
+            MainActor.assumeIsolated {
+                let store = NotchCustomizationStore.shared
+                if store.isEditing {
+                    // External monitor plug/unplug during live edit
+                    // auto-cancels the session, restoring the draft
+                    // origin. The user can re-enter live edit mode
+                    // on the new active screen.
+                    store.cancelEdit()
+                }
+                self?.onScreenChange()
+            }
         }
     }
 
