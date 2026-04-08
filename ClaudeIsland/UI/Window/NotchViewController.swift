@@ -41,6 +41,13 @@ class NotchViewController: NSViewController {
     }
 
     override func loadView() {
+        // NotchView reads NotchCustomizationStore.shared directly via
+        // an @ObservedObject on the singleton (see NotchView.swift).
+        // Because the store is a MainActor singleton, there is no need
+        // to cross an @EnvironmentObject boundary here — direct
+        // observation avoids the generic type mismatch that
+        // `environmentObject(_:)` would introduce into the
+        // strictly-typed PassThroughHostingView<NotchView>.
         hostingView = PassThroughHostingView(rootView: NotchView(viewModel: viewModel))
 
         hostingView.isOpened = { [weak self] in

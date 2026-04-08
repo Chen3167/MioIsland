@@ -1,0 +1,124 @@
+//
+//  NotchCustomization.swift
+//  ClaudeIsland
+//
+//  Single value type holding every user-adjustable notch setting.
+//  Persisted atomically by NotchCustomizationStore under the
+//  UserDefaults key `notchCustomization.v1`. See
+//  docs/superpowers/specs/2026-04-08-notch-customization-design.md
+//  for the full architectural rationale.
+//
+
+import CoreGraphics
+import Foundation
+
+struct NotchCustomization: Codable, Equatable {
+    // Appearance
+    var theme: NotchThemeID
+    var fontScale: FontScale
+
+    // Visibility toggles
+    var showBuddy: Bool
+    var showUsageBar: Bool
+
+    // Geometry — all user-controlled via live edit mode.
+    /// Upper bound for auto-expand. Idle content shrinks below this;
+    /// long content expands up to this and truncates beyond.
+    var maxWidth: CGFloat
+    /// Signed horizontal offset from the screen's center (pinned to top).
+    /// Render-time clamped; stored value preserved for later screen changes.
+    var horizontalOffset: CGFloat
+
+    // Hardware notch override
+    var hardwareNotchMode: HardwareNotchMode
+
+    init(
+        theme: NotchThemeID = .classic,
+        fontScale: FontScale = .default,
+        showBuddy: Bool = true,
+        showUsageBar: Bool = true,
+        maxWidth: CGFloat = 440,
+        horizontalOffset: CGFloat = 0,
+        hardwareNotchMode: HardwareNotchMode = .auto
+    ) {
+        self.theme = theme
+        self.fontScale = fontScale
+        self.showBuddy = showBuddy
+        self.showUsageBar = showUsageBar
+        self.maxWidth = maxWidth
+        self.horizontalOffset = horizontalOffset
+        self.hardwareNotchMode = hardwareNotchMode
+    }
+
+    static let `default` = NotchCustomization()
+
+    // MARK: - Forward-compat Codable
+    //
+    // Decoding with defaults for missing keys so that future schema
+    // additions remain backward-compatible without bumping the v1
+    // key. (The plan's "strict decoding" variant was a documentation
+    // preference; forward-compat decoding is the pragmatic choice
+    // for a Mac app shipping value types to user defaults.)
+
+    private enum CodingKeys: String, CodingKey {
+        case theme, fontScale, showBuddy, showUsageBar,
+             maxWidth, horizontalOffset, hardwareNotchMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.theme = try c.decodeIfPresent(NotchThemeID.self, forKey: .theme) ?? .classic
+        self.fontScale = try c.decodeIfPresent(FontScale.self, forKey: .fontScale) ?? .default
+        self.showBuddy = try c.decodeIfPresent(Bool.self, forKey: .showBuddy) ?? true
+        self.showUsageBar = try c.decodeIfPresent(Bool.self, forKey: .showUsageBar) ?? true
+        self.maxWidth = try c.decodeIfPresent(CGFloat.self, forKey: .maxWidth) ?? 440
+        self.horizontalOffset = try c.decodeIfPresent(CGFloat.self, forKey: .horizontalOffset) ?? 0
+        self.hardwareNotchMode = try c.decodeIfPresent(HardwareNotchMode.self, forKey: .hardwareNotchMode) ?? .auto
+    }
+}
+
+/// Identifier for one of the six built-in themes. Raw string values
+/// so persisted JSON is stable across code renames.
+enum NotchThemeID: String, Codable, CaseIterable, Identifiable {
+    case classic
+    case paper
+    case neonLime
+    case cyber
+    case mint
+    case sunset
+
+    var id: String { rawValue }
+}
+
+/// Four-step relative font scale. String raw values for stable
+/// persistence; `CGFloat` multiplier exposed via computed property
+/// so we avoid the historical fragility of `Codable` on `CGFloat`
+/// raw values.
+enum FontScale: String, Codable, CaseIterable {
+    case small    = "small"
+    case `default` = "default"
+    case large    = "large"
+    case xLarge   = "xLarge"
+
+    var multiplier: CGFloat {
+        switch self {
+        case .small:    return 0.85
+        case .default:  return 1.0
+        case .large:    return 1.15
+        case .xLarge:   return 1.3
+        }
+    }
+}
+
+/// How CodeIsland treats the MacBook's physical notch when
+/// computing the panel geometry.
+///
+/// `auto` — detect via `NSScreen.main?.safeAreaInsets.top > 0`.
+/// `forceVirtual` — ignore any hardware notch and draw a
+///   virtual, user-positionable overlay (useful on external
+///   displays or when the user prefers a freely-resized notch
+///   even on a notched Mac).
+enum HardwareNotchMode: String, Codable {
+    case auto
+    case forceVirtual
+}
