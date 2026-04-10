@@ -993,7 +993,7 @@ field.
   - **Case still open (error 7000 unresolved):** v1.10.0 ships as a
     pre-release `v1.10.0-rc1` "signed but not notarized" via
     GitHub Releases, mirroring the v1.9.0-rc1 pattern. Homebrew cask
-    in `xmqywx/homebrew-codeisland` is updated with the new version
+    in `IsleOS/homebrew-codeisland` is updated with the new version
     + sha256 + the existing postflight `xattr -dr
     com.apple.quarantine` hook stays in place.
   - **Case resolved:** v1.10.0 ships as a regular Release. Homebrew
