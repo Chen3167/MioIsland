@@ -53,9 +53,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             self?.handleScreenChange()
         }
 
-        // Load installed plugins from ~/.config/codeisland/plugins/
-        PluginManager.shared.loadAll()
-
         // Initialize CodeLight sync (connects to server if configured)
         _ = SyncManager.shared
 
@@ -72,13 +69,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationWillTerminate(_ notification: Notification) {
         screenObserver = nil
-    }
-
-    // Handle codeisland:// URL scheme for license activation
-    func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            LicenseManager.shared.handleURL(url)
-        }
     }
 
     // Allow notifications to show even when app is in foreground

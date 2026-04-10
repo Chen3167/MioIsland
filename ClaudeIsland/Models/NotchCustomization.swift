@@ -14,7 +14,7 @@ import Foundation
 
 struct NotchCustomization: Codable, Equatable {
     // Appearance
-    var theme: String               // was NotchThemeID; string IDs match old rawValues
+    var theme: NotchThemeID
     var fontScale: FontScale
 
     // Visibility toggles
@@ -32,22 +32,14 @@ struct NotchCustomization: Codable, Equatable {
     // Hardware notch override
     var hardwareNotchMode: HardwareNotchMode
 
-    // Plugin selections
-    var buddyId: String
-    var notificationSoundPlugin: String?
-    var bgmPlugin: String?
-
     init(
-        theme: String = "classic",
+        theme: NotchThemeID = .classic,
         fontScale: FontScale = .default,
         showBuddy: Bool = true,
         showUsageBar: Bool = true,
         maxWidth: CGFloat = 440,
         horizontalOffset: CGFloat = 0,
-        hardwareNotchMode: HardwareNotchMode = .auto,
-        buddyId: String = "pixel-cat",
-        notificationSoundPlugin: String? = nil,
-        bgmPlugin: String? = nil
+        hardwareNotchMode: HardwareNotchMode = .auto
     ) {
         self.theme = theme
         self.fontScale = fontScale
@@ -56,9 +48,6 @@ struct NotchCustomization: Codable, Equatable {
         self.maxWidth = maxWidth
         self.horizontalOffset = horizontalOffset
         self.hardwareNotchMode = hardwareNotchMode
-        self.buddyId = buddyId
-        self.notificationSoundPlugin = notificationSoundPlugin
-        self.bgmPlugin = bgmPlugin
     }
 
     static let `default` = NotchCustomization()
@@ -73,29 +62,33 @@ struct NotchCustomization: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case theme, fontScale, showBuddy, showUsageBar,
-             maxWidth, horizontalOffset, hardwareNotchMode,
-             buddyId, notificationSoundPlugin, bgmPlugin
+             maxWidth, horizontalOffset, hardwareNotchMode
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        // theme: decode as String; old NotchThemeID rawValues are already valid strings
-        self.theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? "classic"
+        self.theme = try c.decodeIfPresent(NotchThemeID.self, forKey: .theme) ?? .classic
         self.fontScale = try c.decodeIfPresent(FontScale.self, forKey: .fontScale) ?? .default
         self.showBuddy = try c.decodeIfPresent(Bool.self, forKey: .showBuddy) ?? true
         self.showUsageBar = try c.decodeIfPresent(Bool.self, forKey: .showUsageBar) ?? true
         self.maxWidth = try c.decodeIfPresent(CGFloat.self, forKey: .maxWidth) ?? 440
         self.horizontalOffset = try c.decodeIfPresent(CGFloat.self, forKey: .horizontalOffset) ?? 0
         self.hardwareNotchMode = try c.decodeIfPresent(HardwareNotchMode.self, forKey: .hardwareNotchMode) ?? .auto
-        self.buddyId = try c.decodeIfPresent(String.self, forKey: .buddyId) ?? "pixel-cat"
-        self.notificationSoundPlugin = try? c.decodeIfPresent(String.self, forKey: .notificationSoundPlugin)
-        self.bgmPlugin = try? c.decodeIfPresent(String.self, forKey: .bgmPlugin)
     }
 }
 
-// NotchThemeID enum removed — replaced by ThemeRegistry + ThemeDefinition.
-// Built-in theme IDs ("classic", "paper", "neonLime", "cyber", "mint", "sunset")
-// are preserved as String values for UserDefaults backward compatibility.
+/// Identifier for one of the six built-in themes. Raw string values
+/// so persisted JSON is stable across code renames.
+enum NotchThemeID: String, Codable, CaseIterable, Identifiable {
+    case classic
+    case paper
+    case neonLime
+    case cyber
+    case mint
+    case sunset
+
+    var id: String { rawValue }
+}
 
 /// Four-step relative font scale. String raw values for stable
 /// persistence; `CGFloat` multiplier exposed via computed property

@@ -869,13 +869,18 @@ struct CollapsedNotchContent: View {
 
                 // Buddy icon — honors the showBuddy preference.
                 if notchStore.customization.showBuddy {
-                    if let buddy = buddyReader.buddy, !usePixelCat {
+                    if usePixelCat {
+                        PixelCharacterView(state: mostUrgentState)
+                            .scaleEffect(0.28)
+                            .frame(width: 16, height: 16)
+                            .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: true)
+                    } else if let buddy = buddyReader.buddy {
                         EmojiPixelView(emoji: buddy.species.emoji, style: .wave)
                             .scaleEffect(0.30)
                             .frame(width: 16, height: 16)
                             .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: true)
                     } else {
-                        BuddyView(state: mostUrgentState)
+                        PixelCharacterView(state: mostUrgentState)
                             .scaleEffect(0.28)
                             .frame(width: 16, height: 16)
                             .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: true)

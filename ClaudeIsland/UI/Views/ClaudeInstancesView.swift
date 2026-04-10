@@ -218,13 +218,18 @@ struct ClaudeInstancesView: View {
 
             // Animated pixel cat
             VStack(spacing: 12) {
-                if let buddy = buddyReader.buddy, !usePixelCat {
+                if usePixelCat {
+                    PixelCharacterView(state: .idle)
+                        .scaleEffect(0.8)
+                        .frame(width: 52, height: 44)
+                        .offset(y: emptyFloat ? -3 : 3)
+                } else if let buddy = buddyReader.buddy {
                     BuddyASCIIView(buddy: buddy)
                         .frame(width: 80, height: 55)
                         .scaleEffect(0.8)
                         .offset(y: emptyFloat ? -3 : 3)
                 } else {
-                    BuddyView(state: .idle)
+                    PixelCharacterView(state: .idle)
                         .scaleEffect(0.8)
                         .frame(width: 52, height: 44)
                         .offset(y: emptyFloat ? -3 : 3)
@@ -613,11 +618,14 @@ struct InstanceRow: View {
             HStack(alignment: .top, spacing: isActive ? 8 : 6) {
                 // Buddy icon or pixel cat
                 ZStack {
-                    if let buddy = buddyReader.buddy, !usePixelCat {
+                    if usePixelCat {
+                        PixelCharacterView(state: animationState)
+                            .scaleEffect(iconScale)
+                    } else if let buddy = buddyReader.buddy {
                         EmojiPixelView(emoji: buddy.species.emoji, style: .rock)
                             .scaleEffect(iconScale)
                     } else {
-                        BuddyView(state: animationState)
+                        PixelCharacterView(state: animationState)
                             .scaleEffect(iconScale)
                     }
                     // Status dot overlay

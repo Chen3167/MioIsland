@@ -317,15 +317,14 @@ enum L10n {
     static var notchEditDragMode: String { tr("Drag Mode", "拖动模式") }
     static var notchEditReset: String { tr("Reset", "复位") }
     static var notchEditPresetDisabledTooltip: String { tr("Your device doesn't have a hardware notch", "你的设备没有硬件刘海") }
-    static func notchThemeName(_ id: String) -> String {
+    static func notchThemeName(_ id: NotchThemeID) -> String {
         switch id {
-        case "classic":  return notchThemeClassic
-        case "paper":    return notchThemePaper
-        case "neonLime": return notchThemeNeonLime
-        case "cyber":    return notchThemeCyber
-        case "mint":     return notchThemeMint
-        case "sunset":   return notchThemeSunset
-        default:         return ThemeRegistry.shared.theme(for: id)?.name ?? id
+        case .classic:  return notchThemeClassic
+        case .paper:    return notchThemePaper
+        case .neonLime: return notchThemeNeonLime
+        case .cyber:    return notchThemeCyber
+        case .mint:     return notchThemeMint
+        case .sunset:   return notchThemeSunset
         }
     }
 }

@@ -23,9 +23,63 @@ struct NotchPalette: Equatable {
 }
 
 extension NotchPalette {
-    /// Lookup the palette for a given theme ID string.
-    /// Delegates to ThemeRegistry for both built-in and plugin themes.
-    static func `for`(_ id: String) -> NotchPalette {
-        ThemeRegistry.shared.palette(for: id)
+    /// Lookup the palette for a given theme ID. All six cases are
+    /// defined inline so adding a theme means touching exactly one
+    /// switch statement.
+    static func `for`(_ id: NotchThemeID) -> NotchPalette {
+        switch id {
+        case .classic:
+            return NotchPalette(
+                bg: .black,
+                fg: .white,
+                secondaryFg: Color(white: 1, opacity: 0.4)
+            )
+        case .paper:
+            return NotchPalette(
+                bg: .white,
+                fg: .black,
+                secondaryFg: Color(white: 0, opacity: 0.55)
+            )
+        case .neonLime:
+            return NotchPalette(
+                bg: Color(hex: "CAFF00"),
+                fg: .black,
+                secondaryFg: Color(white: 0, opacity: 0.55)
+            )
+        case .cyber:
+            return NotchPalette(
+                bg: Color(hex: "7C3AED"),
+                fg: Color(hex: "F0ABFC"),
+                secondaryFg: Color(hex: "C4B5FD")
+            )
+        case .mint:
+            return NotchPalette(
+                bg: Color(hex: "4ADE80"),
+                fg: .black,
+                secondaryFg: Color(white: 0, opacity: 0.55)
+            )
+        case .sunset:
+            return NotchPalette(
+                bg: Color(hex: "FB923C"),
+                fg: .black,
+                secondaryFg: Color(white: 0, opacity: 0.5)
+            )
+        }
+    }
+}
+
+extension NotchThemeID {
+    /// Human-readable English display name for the theme picker.
+    /// Localized display names are resolved separately in the
+    /// settings view so this file does not depend on L10n.
+    var displayName: String {
+        switch self {
+        case .classic:  return "Classic"
+        case .paper:    return "Paper"
+        case .neonLime: return "Neon Lime"
+        case .cyber:    return "Cyber"
+        case .mint:     return "Mint"
+        case .sunset:   return "Sunset"
+        }
     }
 }

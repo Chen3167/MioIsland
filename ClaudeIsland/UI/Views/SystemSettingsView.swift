@@ -114,7 +114,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case appearance
     case notifications
     case behavior
-    case plugins
     case codelight       // Pair iPhone + Launch Presets merged
     case advanced
     case about
@@ -127,7 +126,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .appearance:    return "paintbrush.fill"
         case .notifications: return "bell.badge.fill"
         case .behavior:      return "slider.horizontal.3"
-        case .plugins:       return "puzzlepiece.extension.fill"
         case .codelight:     return "iphone.radiowaves.left.and.right"
         case .advanced:      return "wrench.and.screwdriver.fill"
         case .about:         return "info.circle.fill"
@@ -140,7 +138,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .appearance:    return L10n.tabAppearance
         case .notifications: return L10n.tabNotifications
         case .behavior:      return L10n.tabBehavior
-        case .plugins:       return "Plugins"
         case .codelight:     return L10n.tabCodeLight
         case .advanced:      return L10n.tabAdvanced
         case .about:         return L10n.tabAbout
@@ -289,7 +286,6 @@ private struct SystemSettingsContentView: View {
                 case .appearance:    AppearanceTab()
                 case .notifications: NotificationsTab()
                 case .behavior:      BehaviorTab()
-                case .plugins:       PluginStoreView()
                 case .codelight:     CodeLightTab()
                 case .advanced:      AdvancedTab()
                 case .about:         AboutTab()
