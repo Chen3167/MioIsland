@@ -63,6 +63,7 @@ class NotchViewModel: ObservableObject {
     let geometry: NotchGeometry
     let spacing: CGFloat = 12
     let hasPhysicalNotch: Bool
+    let screenID: String
 
     /// Current expansion width from NotchView (synced for hit testing)
     @Published var currentExpansionWidth: CGFloat = 240
@@ -159,7 +160,8 @@ class NotchViewModel: ObservableObject {
 
     // MARK: - Initialization
 
-    init(deviceNotchRect: CGRect, screenRect: CGRect, windowHeight: CGFloat, hasPhysicalNotch: Bool) {
+    init(deviceNotchRect: CGRect, screenRect: CGRect, windowHeight: CGFloat, hasPhysicalNotch: Bool, screenID: String) {
+        self.screenID = screenID
         self.geometry = NotchGeometry(
             deviceNotchRect: deviceNotchRect,
             screenRect: screenRect,
@@ -213,10 +215,10 @@ class NotchViewModel: ObservableObject {
     /// when the smaller built-in is the active one. Mirrors the same
     /// clamp NotchView applies for `.offset(x:)` rendering.
     private var currentHorizontalOffset: CGFloat {
-        let stored = NotchCustomizationStore.shared.customization.horizontalOffset
+        let geo = NotchCustomizationStore.shared.customization.geometry(for: screenID)
         let runtime: CGFloat = status == .opened ? openedSize.width : (geometry.deviceNotchRect.width + currentExpansionWidth)
         return NotchHardwareDetector.clampedHorizontalOffset(
-            storedOffset: stored,
+            storedOffset: geo.horizontalOffset,
             runtimeWidth: runtime,
             screenWidth: geometry.screenRect.width
         )
