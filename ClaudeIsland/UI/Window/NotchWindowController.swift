@@ -86,6 +86,8 @@ class NotchWindowController: NSWindowController {
                     // Accept mouse events when opened so buttons work
                     notchWindow?.ignoresMouseEvents = false
                     notchWindow?.acceptsMouseMovedEvents = true
+                    // Elevate above menu bar icons so clicks land on the notch
+                    notchWindow?.level = .popUpMenu
                     // Only steal focus on user-initiated opens (click)
                     // Hover/notification opens should not interrupt typing in other apps
                     if viewModel?.shouldActivateOnOpen == true {
@@ -97,6 +99,9 @@ class NotchWindowController: NSWindowController {
                 case .closed, .popping:
                     // Ignore mouse events when closed so clicks pass through
                     notchWindow?.ignoresMouseEvents = true
+                    // Lower back to normal level so transparent areas
+                    // don't block clicks on menu bar icons
+                    notchWindow?.level = .mainMenu + 3
                 }
             }
             .store(in: &cancellables)

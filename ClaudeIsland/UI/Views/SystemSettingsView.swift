@@ -47,6 +47,7 @@ struct SystemSettingsRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
+            .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)

@@ -58,6 +58,7 @@ struct ClaudeInstancesView: View {
                         flatList
                     }
                 }
+                .padding(.bottom, 50)
 
                 // Bottom right: buddy + usage stats
                 // Hidden when buddy card open or when expanded with many sessions
@@ -87,6 +88,7 @@ struct ClaudeInstancesView: View {
                         }
                     }
                     .padding(.trailing, 4)
+                    .padding(.bottom, 12)
                     .padding(.bottom, 2)
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }

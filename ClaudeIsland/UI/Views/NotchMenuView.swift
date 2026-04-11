@@ -57,7 +57,7 @@ struct NotchMenuView: View {
             // All toggles / pickers / accessibility now live in the floating
             // SystemSettingsWindow opened from the Settings row below.
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 4) {
+                VStack(spacing: 8) {
                     // Yesterday's activity report. Renders nothing on quiet
                     // days so the menu stays compact when you didn't work.
                     DailyReportCard(viewModel: viewModel)
@@ -66,6 +66,7 @@ struct NotchMenuView: View {
                     SystemSettingsRow()
                 }
                 .padding(.horizontal, 4)
+                .padding(.top, 8)
                 .padding(.bottom, 8)
             }
         }
