@@ -453,8 +453,10 @@ struct NotchView: View {
                 PluginContentView(pluginId: pluginId, viewModel: viewModel)
             }
 
-            // Plugin footer slot (e.g. mini player bar)
-            PluginSlotView(slot: "footer")
+            // Plugin footer slot (e.g. mini player bar) — only if plugins provide one
+            if NativePluginManager.shared.loadedPlugins.contains(where: { $0.viewForSlot("footer") != nil }) {
+                PluginSlotView(slot: "footer")
+            }
         }
         .frame(width: notchSize.width - 24) // Fixed width to prevent text reflow
         // Removed .id() - was causing view recreation and performance issues

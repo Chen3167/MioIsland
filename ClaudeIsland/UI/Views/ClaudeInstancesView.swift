@@ -35,21 +35,14 @@ struct ClaudeInstancesView: View {
                             .notchSecondaryForeground()
                         Spacer()
 
-                        // Plugin header slot (e.g. music button)
-                        PluginSlotView(slot: "header")
+                        // Plugin header buttons
+                        PluginHeaderButtons(viewModel: viewModel)
 
-                        Button {
+                        HeaderIconButton(icon: "gearshape", hoverColor: Color(red: 0xCA/255, green: 0xFF/255, blue: 0x00/255)) {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 viewModel.toggleMenu()
                             }
-                        } label: {
-                            Image(systemName: "gearshape")
-                                .notchFont(10)
-                                .notchSecondaryForeground()
-                                .frame(width: 24, height: 24)
-                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 10)
                     .padding(.top, 6)
@@ -203,8 +196,8 @@ struct ClaudeInstancesView: View {
             HStack {
                 Spacer()
 
-                // Plugin header slot
-                PluginSlotView(slot: "header")
+                // Plugin header buttons
+                PluginHeaderButtons(viewModel: viewModel)
 
                 Button {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
