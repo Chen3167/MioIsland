@@ -199,11 +199,11 @@ final class SyncManager: ObservableObject {
         // back as a synthetic terminal_output message, same pipeline as slash commands.
         if isReadScreenRequest(text) {
             if let uuid = targetUuid {
-                let snapshot = await TerminalWriter.shared.readScreen(claudeUuid: uuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWsId, cmuxSurfaceId: cmuxSurfId)
+                let snapshot = await TerminalWriter.shared.readScreen(claudeUuid: uuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWsId, cmuxSurfaceId: cmuxSurfId, terminalApp: trackedSession?.terminalApp)
                 if let snapshot, !snapshot.isEmpty {
                     await sendTerminalOutputMessage(sessionId: serverSessionId, command: "read-screen", output: snapshot)
                 }
-                Self.logger.info("Phone read-screen (uuid=\(uuid.prefix(8), privacy: .public) pid=\(livePid?.description ?? "nil", privacy: .public)) → captured=\(snapshot != nil)")
+                Self.logger.info("Phone read-screen (uuid=\(uuid.prefix(8), privacy: .public) pid=\(livePid?.description ?? "nil", privacy: .public) term=\(trackedSession?.terminalApp ?? "nil", privacy: .public)) → captured=\(snapshot != nil)")
             } else {
                 Self.logger.warning("read-screen dropped: no target uuid")
             }
@@ -214,7 +214,7 @@ final class SyncManager: ObservableObject {
         // These don't go through stdin — we fire them directly at the cmux surface.
         if let controlKey = parseControlKey(text) {
             if let uuid = targetUuid {
-                let ok = await TerminalWriter.shared.sendControlKey(controlKey, claudeUuid: uuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWsId, cmuxSurfaceId: cmuxSurfId)
+                let ok = await TerminalWriter.shared.sendControlKey(controlKey, claudeUuid: uuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWsId, cmuxSurfaceId: cmuxSurfId, terminalApp: trackedSession?.terminalApp)
                 Self.logger.info("Phone control key '\(controlKey, privacy: .public)' (uuid=\(uuid.prefix(8), privacy: .public) pid=\(livePid?.description ?? "nil", privacy: .public)) → \(ok ? "success" : "failed")")
             } else {
                 Self.logger.warning("Control key dropped: no target uuid")
@@ -243,7 +243,7 @@ final class SyncManager: ObservableObject {
             if images.isEmpty {
                 Self.logger.warning("No images could be downloaded — falling back to text-only")
             } else {
-                let ok = await TerminalWriter.shared.sendImagesAndText(images: images, text: parsedText, claudeUuid: targetUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWsId, cmuxSurfaceId: cmuxSurfId)
+                let ok = await TerminalWriter.shared.sendImagesAndText(images: images, text: parsedText, claudeUuid: targetUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWsId, cmuxSurfaceId: cmuxSurfId, terminalApp: trackedSession?.terminalApp)
                 if ok { recordPhoneInjection(claudeUuid: targetUuid, text: parsedText) }
                 Self.logger.info("Phone message with \(images.count) image(s) → terminal: \(ok ? "success" : "failed")")
                 return
@@ -256,16 +256,22 @@ final class SyncManager: ObservableObject {
         // command, wait, snapshot again, diff, and ship the new lines back as a
         // synthetic terminal_output message.
         if parsedText.hasPrefix("/"), let targetUuid {
-            let output = await TerminalWriter.shared.sendSlashCommandAndCaptureOutput(parsedText, claudeUuid: targetUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWsId, cmuxSurfaceId: cmuxSurfId)
-            recordPhoneInjection(claudeUuid: targetUuid, text: parsedText)
-            if let output, !output.isEmpty {
-                await sendTerminalOutputMessage(sessionId: serverSessionId, command: parsedText, output: output)
+            let output = await TerminalWriter.shared.sendSlashCommandAndCaptureOutput(parsedText, claudeUuid: targetUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWsId, cmuxSurfaceId: cmuxSurfId, terminalApp: trackedSession?.terminalApp)
+            if let output {
+                // Command was sent and output captured (may be empty if no visible change)
+                recordPhoneInjection(claudeUuid: targetUuid, text: parsedText)
+                if !output.isEmpty {
+                    await sendTerminalOutputMessage(sessionId: serverSessionId, command: parsedText, output: output)
+                }
+                Self.logger.info("Phone slash command /\(parsedText.dropFirst().prefix(20)) → captured")
+                return
             }
-            Self.logger.info("Phone slash command /\(parsedText.dropFirst().prefix(20)) → captured=\(output != nil)")
-            return
+            // cmux target not found — fall through to plain text path for non-cmux terminals
+            Self.logger.info("Slash command /\(parsedText.dropFirst().prefix(20)) capture unavailable, sending as text")
         }
 
         // Plain text path — uses the unified target identity computed at the top.
+        let termApp = trackedSession?.terminalApp
         if let uuid = targetUuid {
             let sent = await TerminalWriter.shared.sendTextDirect(
                 parsedText,
@@ -273,7 +279,8 @@ final class SyncManager: ObservableObject {
                 cwd: cwd,
                 livePid: livePid,
                 cmuxWorkspaceId: cmuxWsId,
-                cmuxSurfaceId: cmuxSurfId
+                cmuxSurfaceId: cmuxSurfId,
+                terminalApp: termApp
             )
             if sent { recordPhoneInjection(claudeUuid: uuid, text: parsedText) }
             Self.logger.info("Phone message → terminal (uuid=\(uuid.prefix(8), privacy: .public) pid=\(livePid?.description ?? "nil", privacy: .public)): \(sent ? "success" : "failed")")

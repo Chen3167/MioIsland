@@ -276,15 +276,7 @@ final class TerminalWriter {
         }
 
         if termApp.contains("ghostty") {
-            // Ghostty: use keystroke via System Events
-            return await sendViaAppleScript(text, script: """
-                tell application "Ghostty" to activate
-                delay 0.3
-                tell application "System Events"
-                    keystroke "\(text.replacingOccurrences(of: "\"", with: "\\\""))"
-                    key code 36
-                end tell
-                """)
+            return await sendViaGhosttyDirect(text, cwd: session.cwd)
         }
 
         if termApp.contains("terminal") && !termApp.contains("wez") {
@@ -309,40 +301,215 @@ final class TerminalWriter {
     /// only 100% reliable identity, because it doesn't depend on argv parsing
     /// or cwd matching. argv/cwd fallbacks only kick in if the pid is missing
     /// or stale.
-    func sendTextDirect(_ text: String, claudeUuid: String, cwd: String?, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil) async -> Bool {
-        guard FileManager.default.isExecutableFile(atPath: cmuxPath) else {
-            Self.logger.warning("cmux not found at \(self.cmuxPath)")
-            return false
+    func sendTextDirect(_ text: String, claudeUuid: String, cwd: String?, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil, terminalApp: String? = nil) async -> Bool {
+        let resolved = await resolveTerminalApp(terminalApp: terminalApp, claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId)
+
+        if resolved == "cmux" {
+            return await sendViaCmuxDirect(text, claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId)
         }
-        return await sendViaCmuxDirect(text, claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId)
+
+        return await sendViaTerminalFallback(text, cwd: cwd, terminalApp: resolved)
     }
 
     /// Send a single control key (escape, ctrl+c, enter, …) to the Claude terminal.
     /// Returns true if the cmux surface was found and send-key invoked.
-    func sendControlKey(_ key: String, claudeUuid: String, cwd: String? = nil, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil) async -> Bool {
-        guard let (wsId, surfId) = await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId),
-              let surfId else {
-            Self.logger.warning("sendControlKey: no cmux target for uuid=\(claudeUuid.prefix(8))")
+    func sendControlKey(_ key: String, claudeUuid: String, cwd: String? = nil, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil, terminalApp: String? = nil) async -> Bool {
+        let resolved = await resolveTerminalApp(terminalApp: terminalApp, claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId)
+
+        if resolved == "cmux" {
+            if let (wsId, surfId) = await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId),
+               let surfId {
+                let result = await cmuxRun(["send-key", "--workspace", wsId, "--surface", surfId, "--", key])
+                Self.logger.info("Sent key '\(key)' to cmux (ws=\(wsId.prefix(8)) surf=\(surfId.prefix(8))) result=\(result != nil)")
+                return result != nil
+            }
             return false
         }
-        let result = await cmuxRun(["send-key", "--workspace", wsId, "--surface", surfId, "--", key])
-        Self.logger.info("Sent key '\(key)' to cmux (ws=\(wsId.prefix(8)) surf=\(surfId.prefix(8))) result=\(result != nil)")
-        return result != nil
+
+        return await sendControlKeyViaTerminalFallback(key, cwd: cwd, terminalApp: resolved)
     }
 
     /// Snapshot the current cmux surface (visible pane + scrollback) as plain text.
     /// Used by the phone's "read screen" button so the user can check terminal state
     /// without injecting any input. Returns nil if the surface can't be located.
-    func readScreen(claudeUuid: String, cwd: String? = nil, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil, lines: Int = 500) async -> String? {
-        guard let (wsId, surfId) = await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId),
-              let surfId else {
-            Self.logger.warning("readScreen: no cmux target for uuid=\(claudeUuid.prefix(8))")
+    func readScreen(claudeUuid: String, cwd: String? = nil, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil, terminalApp: String? = nil, lines: Int = 500) async -> String? {
+        let resolved = await resolveTerminalApp(terminalApp: terminalApp, claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId)
+
+        if resolved == "cmux" {
+            guard let (wsId, surfId) = await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId),
+                  let surfId else {
+                Self.logger.warning("readScreen: no cmux target for uuid=\(claudeUuid.prefix(8))")
+                return nil
+            }
+            let raw = await cmuxRun(["read-screen", "--workspace", wsId, "--surface", surfId, "--scrollback", "--lines", "\(lines)"]) ?? ""
+            let split = raw.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+            let cleaned = cleanupOutputLines(split)
+            return cleaned.isEmpty ? nil : cleaned
+        }
+
+        if resolved?.contains("ghostty") == true {
+            return await readScreenViaGhostty(cwd: cwd, lines: lines)
+        }
+
+        Self.logger.warning("readScreen: unsupported terminal \(resolved ?? "nil")")
+        return nil
+    }
+
+    /// Capture raw text from Ghostty via its native AppleScript action API.
+    /// Returns raw text (no cleanup) for accurate diffing, or cleaned text for display.
+    private func captureGhosttyScreen(cwd: String?) async -> String? {
+        await activateGhostty(cwd: cwd)
+
+        let pb = NSPasteboard.general
+        let savedClipboardItems = Self.clonePasteboardItems(pb)
+
+        pb.clearContents()
+
+        // Ask Ghostty to write the visible screen as plain text. This avoids
+        // Select All and bypasses System Events key synthesis, which does not
+        // reliably trigger Ghostty's internal keybind handling.
+        let ok = await performGhosttyAction("write_screen_file:copy,plain", cwd: cwd)
+
+        guard ok else {
+            Self.restorePasteboardItems(savedClipboardItems, to: pb)
+            Self.logger.warning("captureGhosttyScreen: AppleScript failed")
             return nil
         }
-        let raw = await cmuxRun(["read-screen", "--workspace", wsId, "--surface", surfId, "--scrollback", "--lines", "\(lines)"]) ?? ""
-        let split = raw.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
-        let cleaned = cleanupOutputLines(split)
+
+        let clipboardString = await waitForPasteboardString(pb)
+        let captured = Self.resolveGhosttyScreenCapture(clipboardString)
+
+        Self.restorePasteboardItems(savedClipboardItems, to: pb)
+
+        guard !captured.isEmpty else {
+            Self.logger.warning("captureGhosttyScreen: clipboard empty after copy")
+            return nil
+        }
+
+        Self.logger.info("captureGhosttyScreen: captured \(captured.count) chars")
+        return captured
+    }
+
+    /// Read screen content from Ghostty — cleaned for display.
+    private func readScreenViaGhostty(cwd: String?, lines: Int = 500) async -> String? {
+        guard let raw = await captureGhosttyScreen(cwd: cwd) else { return nil }
+        let allLines = raw.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        // Ghostty 1.3.x can return more than the viewport here; keep read-screen
+        // bounded to a visible-window sized slice without affecting slash diffing.
+        let visibleLineLimit = min(lines, 80)
+        let trimmed = allLines.count > visibleLineLimit ? Array(allLines.suffix(visibleLineLimit)) : allLines
+        let cleaned = cleanupOutputLines(trimmed)
         return cleaned.isEmpty ? nil : cleaned
+    }
+
+    /// Execute a Ghostty action directly through its AppleScript dictionary.
+    private func performGhosttyAction(_ action: String, cwd: String?) async -> Bool {
+        let actionLiteral = Self.appleScriptStringLiteral(action)
+        let cwdBlock: String
+        if let cwd, !cwd.isEmpty {
+            cwdBlock = """
+                set cwdNeedle to \(Self.appleScriptStringLiteral(cwd))
+                repeat with candidateTerm in terminals
+                    if (working directory of candidateTerm) contains cwdNeedle then
+                        set targetTerm to contents of candidateTerm
+                        exit repeat
+                    end if
+                end repeat
+                """
+        } else {
+            cwdBlock = ""
+        }
+
+        return await runOsascript("""
+            tell application "Ghostty"
+                set targetTerm to missing value
+                \(cwdBlock)
+                if targetTerm is missing value then
+                    try
+                        set targetTerm to focused terminal of selected tab of front window
+                    end try
+                end if
+                if targetTerm is missing value then
+                    if (count of terminals) is 0 then return false
+                    set targetTerm to item 1 of terminals
+                end if
+                if not (perform action \(actionLiteral) on targetTerm) then error "Ghostty action failed"
+                delay 0.15
+                return true
+            end tell
+            """)
+    }
+
+    private func waitForPasteboardString(_ pasteboard: NSPasteboard) async -> String {
+        for _ in 0..<20 {
+            if let value = pasteboard.string(forType: .string), !value.isEmpty {
+                return value
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return pasteboard.string(forType: .string) ?? ""
+    }
+
+    private static func resolveGhosttyScreenCapture(_ clipboardString: String) -> String {
+        let trimmed = clipboardString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let fileContent = readGhosttyCaptureFile(atPath: trimmed) {
+            return fileContent
+        }
+        return clipboardString
+    }
+
+    private static func readGhosttyCaptureFile(atPath path: String) -> String? {
+        guard !path.isEmpty,
+              !path.contains("\n"),
+              !path.contains("\r") else { return nil }
+
+        let url: URL
+        if path.hasPrefix("file://"), let parsed = URL(string: path), parsed.isFileURL {
+            url = parsed.standardizedFileURL
+        } else {
+            guard path.hasPrefix("/") else { return nil }
+            url = URL(fileURLWithPath: path).standardizedFileURL
+        }
+
+        let filePath = url.path
+        guard FileManager.default.isReadableFile(atPath: filePath),
+              let attrs = try? FileManager.default.attributesOfItem(atPath: filePath),
+              let size = attrs[.size] as? NSNumber,
+              size.uint64Value <= 5_000_000,
+              let data = try? Data(contentsOf: url) else { return nil }
+
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func appleScriptStringLiteral(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
+    private static func clonePasteboardItems(_ pasteboard: NSPasteboard) -> [NSPasteboardItem] {
+        (pasteboard.pasteboardItems ?? []).compactMap { item in
+            let clone = NSPasteboardItem()
+            var copiedAnyType = false
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    clone.setData(data, forType: type)
+                    copiedAnyType = true
+                } else if let string = item.string(forType: type) {
+                    clone.setString(string, forType: type)
+                    copiedAnyType = true
+                }
+            }
+            return copiedAnyType ? clone : nil
+        }
+    }
+
+    private static func restorePasteboardItems(_ items: [NSPasteboardItem], to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        if !items.isEmpty {
+            pasteboard.writeObjects(items)
+        }
     }
 
     /// Capture the terminal output that appeared *after* a slash command was sent.
@@ -351,28 +518,62 @@ final class TerminalWriter {
     ///
     /// Returns nil if we can't locate the cmux surface for this Claude session or
     /// capture fails.
-    func sendSlashCommandAndCaptureOutput(_ command: String, claudeUuid: String, cwd: String? = nil, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil, settleMs: UInt64 = 1500) async -> String? {
-        guard let (wsId, surfId) = await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId),
-              let surfId else {
-            Self.logger.warning("captureOutput: no cmux target for uuid=\(claudeUuid.prefix(8))")
-            return nil
+    func sendSlashCommandAndCaptureOutput(_ command: String, claudeUuid: String, cwd: String? = nil, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil, terminalApp: String? = nil, settleMs: UInt64 = 1500) async -> String? {
+        let resolved = await resolveTerminalApp(terminalApp: terminalApp, claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId)
+
+        if resolved == "cmux" {
+            guard let (wsId, surfId) = await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId),
+                  let surfId else {
+                Self.logger.warning("captureOutput: no cmux target for uuid=\(claudeUuid.prefix(8))")
+                return nil
+            }
+
+            let before = await cmuxRun(["read-screen", "--workspace", wsId, "--surface", surfId, "--scrollback", "--lines", "500"]) ?? ""
+            let escaped = command.replacingOccurrences(of: "\n", with: "\r")
+            _ = await cmuxRun(["send", "--workspace", wsId, "--surface", surfId, "--", "\(escaped)\r"])
+            try? await Task.sleep(nanoseconds: settleMs * 1_000_000)
+            let after = await cmuxRun(["read-screen", "--workspace", wsId, "--surface", surfId, "--scrollback", "--lines", "500"]) ?? ""
+
+            let diff = diffTerminalSnapshots(before: before, after: after)
+            return diff.isEmpty ? "" : diff
         }
 
-        // Pre-snapshot
-        let before = await cmuxRun(["read-screen", "--workspace", wsId, "--surface", surfId, "--scrollback", "--lines", "500"]) ?? ""
+        if resolved?.contains("ghostty") == true {
+            // Send command via clipboard paste
+            let sent = await sendViaGhosttyDirect(command, cwd: cwd)
+            guard sent else { return nil }
 
-        // Send the command
-        let escaped = command.replacingOccurrences(of: "\n", with: "\r")
-        _ = await cmuxRun(["send", "--workspace", wsId, "--surface", surfId, "--", "\(escaped)\r"])
+            // Wait for output to render
+            try? await Task.sleep(nanoseconds: settleMs * 1_000_000)
 
-        // Wait for the CLI to render its response
-        try? await Task.sleep(nanoseconds: settleMs * 1_000_000)
+            // Capture screen and extract only content after the command
+            guard let raw = await captureGhosttyScreen(cwd: cwd) else { return nil }
+            let lines = raw.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
 
-        // Post-snapshot
-        let after = await cmuxRun(["read-screen", "--workspace", wsId, "--surface", surfId, "--scrollback", "--lines", "500"]) ?? ""
+            // Find the LAST occurrence of the command in the output
+            let cmdTrimmed = command.trimmingCharacters(in: .whitespaces)
+            var anchorIdx: Int?
+            for i in stride(from: lines.count - 1, through: 0, by: -1) {
+                if lines[i].contains(cmdTrimmed) {
+                    anchorIdx = i
+                    break
+                }
+            }
 
-        let diff = diffTerminalSnapshots(before: before, after: after)
-        return diff.isEmpty ? nil : diff
+            let newLines: [String]
+            if let idx = anchorIdx, idx + 1 < lines.count {
+                newLines = Array(lines.suffix(from: idx + 1))
+            } else {
+                // Fallback: last 30 lines
+                newLines = Array(lines.suffix(30))
+            }
+
+            let cleaned = cleanupOutputLines(newLines)
+            return cleaned.isEmpty ? "" : cleaned
+        }
+
+        Self.logger.warning("captureOutput: unsupported terminal \(resolved ?? "nil")")
+        return nil
     }
 
     /// Extract the text that newly appeared in `after` relative to `before`.
@@ -403,12 +604,17 @@ final class TerminalWriter {
 
     /// Normalize captured terminal lines: trim trailing whitespace, drop leading
     /// blank lines, collapse long runs of empty lines, cap total length.
+    /// Regex to strip ANSI escape sequences — compiled once.
+    private static let ansiPattern = try! NSRegularExpression(
+        pattern: "\\x1b\\[[0-9;]*[A-Za-z]|\\x1b\\][^\\x07]*\\x07|\\x1b[()][A-Za-z0-9]", options: [])
+
     nonisolated private func cleanupOutputLines(_ lines: [String]) -> String {
         var cleaned: [String] = []
         var blankRun = 0
         for rawLine in lines {
-            let line = rawLine.replacingOccurrences(of: "\u{00A0}", with: " ")
-                .trimmingCharacters(in: CharacterSet(charactersIn: " \t\r"))
+            var line = rawLine.replacingOccurrences(of: "\u{00A0}", with: " ")
+            line = Self.ansiPattern.stringByReplacingMatches(in: line, range: NSRange(line.startIndex..., in: line), withTemplate: "")
+            line = line.trimmingCharacters(in: CharacterSet(charactersIn: " \t\r"))
             if line.isEmpty {
                 blankRun += 1
                 if blankRun <= 1 && !cleaned.isEmpty {
@@ -432,13 +638,16 @@ final class TerminalWriter {
     /// Paste one or more images into the terminal running the given Claude session,
     /// then send any accompanying text. Uses NSPasteboard + CGEvent Cmd+V via cmux focus.
     /// Returns true if at least the focusing + paste attempts succeeded.
-    func sendImagesAndText(images: [Data], text: String, claudeUuid: String, cwd: String? = nil, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil) async -> Bool {
-        guard let (wsId, surfId) = await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId) else {
-            Self.logger.warning("sendImagesAndText: no cmux target for uuid=\(claudeUuid.prefix(8))")
-            return false
+    func sendImagesAndText(images: [Data], text: String, claudeUuid: String, cwd: String? = nil, livePid: Int? = nil, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil, terminalApp: String? = nil) async -> Bool {
+        let resolved = await resolveTerminalApp(terminalApp: terminalApp, claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId)
+
+        if resolved != "cmux" {
+            return await sendImagesViaTerminalFallback(images: images, text: text, cwd: cwd, terminalApp: resolved)
         }
-        guard let surfId else {
-            Self.logger.warning("sendImagesAndText: missing surface id for uuid=\(claudeUuid.prefix(8))")
+
+        guard let (wsId, surfId) = await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId),
+              let surfId else {
+            Self.logger.warning("sendImagesAndText: cmux resolved but no target found")
             return false
         }
 
@@ -808,6 +1017,252 @@ final class TerminalWriter {
             Self.logger.info("Sent message via AppleScript")
         }
         return ok
+    }
+
+    // MARK: - Terminal Routing & Fallbacks
+
+    /// Decide which terminal backend to use for a given session.
+    /// Priority: explicit terminalApp → cmux env-var detection → running terminal probe.
+    private func resolveTerminalApp(terminalApp: String?, claudeUuid: String, cwd: String?, livePid: Int?, cmuxWorkspaceId: String? = nil, cmuxSurfaceId: String? = nil) async -> String? {
+        if let app = terminalApp, !app.isEmpty {
+            return app.lowercased()
+        }
+        // Check if the process lives inside cmux (has CMUX_WORKSPACE_ID env var or direct IDs)
+        if await findCmuxTarget(claudeUuid: claudeUuid, cwd: cwd, livePid: livePid, cmuxWorkspaceId: cmuxWorkspaceId, cmuxSurfaceId: cmuxSurfaceId) != nil {
+            return "cmux"
+        }
+        return detectRunningTerminal()
+    }
+
+    /// Check which supported terminal is currently running (excluding cmux).
+    private func detectRunningTerminal() -> String? {
+        let candidates: [(bundleId: String, name: String)] = [
+            ("com.mitchellh.ghostty", "ghostty"),
+            ("com.googlecode.iterm2", "iterm2"),
+            ("com.apple.Terminal", "terminal")
+        ]
+        for (bundleId, name) in candidates {
+            if !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty {
+                return name
+            }
+        }
+        return nil
+    }
+
+    /// Send text via the appropriate non-cmux terminal.
+    private func sendViaTerminalFallback(_ text: String, cwd: String?, terminalApp: String?) async -> Bool {
+        let app = terminalApp ?? ""
+
+        if app.contains("ghostty") {
+            return await sendViaGhosttyDirect(text, cwd: cwd)
+        }
+
+        let escaped = text.replacingOccurrences(of: "\"", with: "\\\"")
+
+        if app.contains("iterm") {
+            return await sendViaAppleScript(text, script: """
+                tell application "iTerm2"
+                    tell current session of current tab of current window
+                        write text "\(escaped)"
+                    end tell
+                end tell
+                """)
+        }
+
+        if app.contains("terminal") && !app.contains("wez") {
+            return await sendViaAppleScript(text, script: """
+                tell application "Terminal"
+                    do script "\(escaped)" in selected tab of front window
+                end tell
+                """)
+        }
+
+        Self.logger.warning("No supported terminal for fallback (detected=\(app))")
+        return false
+    }
+
+    /// Focus the Ghostty terminal matching `cwd`, then type text + Enter.
+    private func sendViaGhosttyDirect(_ text: String, cwd: String?) async -> Bool {
+        await activateGhostty(cwd: cwd)
+
+        // Use clipboard to support CJK and special characters (keystroke only works with ASCII)
+        let pb = NSPasteboard.general
+        let oldContents = pb.string(forType: .string)
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+
+        let ok = await runOsascript("""
+            delay 0.3
+            tell application "System Events"
+                tell process "Ghostty"
+                    keystroke "v" using {command down}
+                    delay 0.2
+                    key code 36
+                end tell
+            end tell
+            """)
+
+        // Restore previous clipboard content
+        if let old = oldContents {
+            pb.clearContents()
+            pb.setString(old, forType: .string)
+        }
+        if ok {
+            Self.logger.info("Sent message via Ghostty (cwd=\(cwd?.suffix(20).description ?? "nil"))")
+        }
+        return ok
+    }
+
+    /// Focus a Ghostty terminal whose working directory matches `cwd`, then activate.
+    /// Combines cwd-matching + activate into a single osascript call.
+    private func activateGhostty(cwd: String?) async {
+        let cwdBlock: String
+        if let cwd = cwd, !cwd.isEmpty {
+            let escapedCwd = cwd.replacingOccurrences(of: "\"", with: "\\\"")
+            cwdBlock = """
+                set matches to every terminal whose working directory contains "\(escapedCwd)"
+                if (count of matches) > 0 then
+                    focus (item 1 of matches)
+                end if
+                """
+        } else {
+            cwdBlock = ""
+        }
+        _ = await runOsascript("""
+            tell application "Ghostty"
+                \(cwdBlock)
+                activate
+            end tell
+            """)
+    }
+
+    /// Send a control key to a non-cmux terminal via System Events key codes.
+    private func sendControlKeyViaTerminalFallback(_ key: String, cwd: String?, terminalApp: String?) async -> Bool {
+        let app = terminalApp ?? ""
+        guard app.contains("ghostty") || app.contains("iterm") || app.contains("terminal") else {
+            Self.logger.warning("sendControlKey: no supported terminal for fallback (detected=\(app))")
+            return false
+        }
+
+        if app.contains("ghostty") {
+            await activateGhostty(cwd: cwd)
+        }
+
+        // Determine the System Events process name for targeting
+        let processName: String
+        if app.contains("ghostty") { processName = "Ghostty" }
+        else if app.contains("iterm") { processName = "iTerm2" }
+        else { processName = "Terminal" }
+
+        // ctrl+<char> modifier combination
+        let lower = key.lowercased()
+        if lower.hasPrefix("ctrl+") || lower.hasPrefix("ctrl-") {
+            let char = String(key.dropFirst(5))
+            let escapedChar = char.replacingOccurrences(of: "\"", with: "\\\"")
+            return await runOsascript("""
+                tell application "System Events"
+                    tell process "\(processName)"
+                        keystroke "\(escapedChar)" using {control down}
+                    end tell
+                end tell
+                """)
+        }
+
+        // Named key → macOS key code
+        let keyCode: Int? = switch lower {
+        case "escape": 53
+        case "enter", "return": 36
+        case "tab": 48
+        case "up": 126
+        case "down": 125
+        case "left": 123
+        case "right": 124
+        case "backspace", "delete": 51
+        case "space": 49
+        default: nil
+        }
+
+        if let code = keyCode {
+            let ok = await runOsascript("""
+                tell application "System Events"
+                    tell process "\(processName)"
+                        key code \(code)
+                    end tell
+                end tell
+                """)
+            Self.logger.info("Sent key '\(key)' (code=\(code)) to \(processName) result=\(ok)")
+            return ok
+        }
+
+        Self.logger.warning("sendControlKey: unmapped key '\(key)' for terminal fallback")
+        return false
+    }
+
+    /// Paste images + text into a non-cmux terminal (Ghostty).
+    private func sendImagesViaTerminalFallback(images: [Data], text: String, cwd: String?, terminalApp: String?) async -> Bool {
+        let app = (terminalApp ?? detectRunningTerminal())?.lowercased() ?? ""
+        guard app.contains("ghostty") else {
+            Self.logger.warning("sendImagesViaTerminalFallback: unsupported terminal \(app)")
+            return false
+        }
+
+        let axTrusted = AXIsProcessTrusted()
+        Self.logger.info("Ghostty image paste: Accessibility trusted=\(axTrusted)")
+
+        await activateGhostty(cwd: cwd)
+
+        // Wait for Ghostty to become frontmost
+        for _ in 0..<10 {
+            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.mitchellh.ghostty" { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        // Paste each image via pasteboard + Ctrl+V (Claude Code uses Ctrl+V for image paste)
+        for (idx, imgData) in images.enumerated() {
+            writeImageToPasteboard(imgData)
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            let pasteOk = await runOsascript("""
+                tell application "System Events"
+                    tell process "Ghostty"
+                        keystroke "v" using {control down}
+                    end tell
+                end tell
+                """)
+            if !pasteOk {
+                Self.logger.info("AppleScript paste failed, falling back to CGEvent")
+                postCmdV()
+            }
+            if idx < images.count - 1 {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 400_000_000)
+
+        // Send accompanying text via clipboard (keystroke can't handle CJK)
+        if !text.isEmpty {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(text, forType: .string)
+            _ = await runOsascript("""
+                tell application "System Events"
+                    tell process "Ghostty"
+                        keystroke "v" using {command down}
+                    end tell
+                end tell
+                """)
+        }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        _ = await runOsascript("""
+            tell application "System Events"
+                tell process "Ghostty"
+                    key code 36
+                end tell
+            end tell
+            """)
+
+        Self.logger.info("Pasted \(images.count) image(s) + text via Ghostty")
+        return true
     }
 }
 
