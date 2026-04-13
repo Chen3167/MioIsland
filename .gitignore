@@ -53,3 +53,11 @@ CodeIsland-v*.zip
 
 # Node
 package-lock.json
+
+# Claude Code worktrees
+.claude/worktrees/
+worktree-agent-*/
+
+# Internal docs / spec drafts (not part of public repo)
+docs/superpowers/
+docs/specs/
