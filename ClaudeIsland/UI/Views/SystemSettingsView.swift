@@ -60,6 +60,15 @@ struct SystemSettingsRow: View {
 
 // MARK: - Floating Window
 
+/// Borderless NSWindows return `false` from `canBecomeKey` by default,
+/// which blocks SwiftUI TextFields inside them from receiving keyboard
+/// focus. Overriding this lets text inputs (e.g. the Anthropic API Proxy
+/// field) accept typing. Mirrors the pattern in PairPhoneView.swift.
+private final class KeyableSettingsWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 @MainActor
 final class SystemSettingsWindow {
     static let shared = SystemSettingsWindow()
@@ -75,7 +84,7 @@ final class SystemSettingsWindow {
 
         let contentView = SystemSettingsContentView(initialTab: initialTab) { self.close() }
         let hostingView = NSHostingView(rootView: contentView)
-        let w = NSWindow(
+        let w = KeyableSettingsWindow(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
             styleMask: [.borderless],
             backing: .buffered,
