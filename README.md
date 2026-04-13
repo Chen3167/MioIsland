@@ -354,6 +354,22 @@ Subsequent launches work normally with a double-click.
 - macOS 15+ (Sequoia) — universal binary (Apple Silicon + Intel)
 - MacBook with notch (floating mode available on external displays)
 
+### HTTP Proxy (for network-restricted regions)
+
+`Settings → General → Anthropic API Proxy` lets you route Code Island's `api.anthropic.com` usage-limit requests through a local HTTP proxy (e.g. `http://127.0.0.1:7890`). This is useful if you run Clash / V2Ray / similar locally and direct connections to Anthropic's servers are unreliable.
+
+**Scope — important:**
+- ✅ Applied to the rate-limit bar in the notch (`RateLimitMonitor` → `api.anthropic.com/api/oauth/usage`)
+- ❌ **Not** applied to the Stats plugin's "Editor's Note" AI daily summary. That feature shells out to the local `claude` CLI as a subprocess, so its network traffic goes through whatever proxy **the CLI itself** is configured with — typically inherited from your shell's `HTTPS_PROXY` env var, `launchctl setenv HTTPS_PROXY ...`, or your system-wide proxy (e.g. Clash TUN mode).
+- ❌ Not applied to CodeLight iPhone sync (our own server, reachable directly).
+
+If you want Stats' Editor's Note to go through the same proxy, the simplest approach is to run once at login:
+```bash
+launchctl setenv HTTPS_PROXY http://127.0.0.1:7890
+launchctl setenv HTTP_PROXY  http://127.0.0.1:7890
+```
+This sets the proxy for all GUI-launched apps, so the `claude` CLI subprocess inherits it automatically.
+
 <details>
 <summary><b>Build from Source</b></summary>
 
