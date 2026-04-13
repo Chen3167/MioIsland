@@ -240,7 +240,8 @@ class RateLimitMonitor: ObservableObject {
         request.timeoutInterval = 10
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let session = AppSettings.makeAnthropicSession()
+            let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
                 DebugLogger.log("RateLimit", "API error: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
