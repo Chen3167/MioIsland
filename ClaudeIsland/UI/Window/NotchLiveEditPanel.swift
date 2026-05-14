@@ -34,9 +34,15 @@ final class NotchLiveEditContentView: NSView {
 
 final class NotchLiveEditPanel: NSPanel {
     init(screen: NSScreen) {
-        // ~160pt tall band across the top of the active screen:
-        // enough room for the notch + the control row beneath.
-        let height: CGFloat = 160
+        // ~220pt tall band across the top of the active screen.
+        // Sizing math: controls anchor to `visibleNotchHeight + 90`
+        // for the action VStack center, which has ~80pt natural
+        // height (2 rows of 35pt + 10pt spacing). At the max
+        // clampedHeight of 80pt, VStack extends to y=210 — so the
+        // panel needs ≥210pt + small slack. 220pt fits all cases.
+        // Previously 160pt, which clipped the Save/Cancel row on any
+        // user notch height > ~30pt.
+        let height: CGFloat = 220
         let screenFrame = screen.frame
         let frame = NSRect(
             x: screenFrame.origin.x,

@@ -8,11 +8,16 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 
+private func pairPhoneTheme() -> ThemeResolver {
+    ThemeResolver(theme: NotchCustomizationStore.shared.customization.theme)
+}
+
 // MARK: - Menu Row (inside NotchMenuView)
 
 struct PairPhoneRow: View {
     @ObservedObject var syncManager = SyncManager.shared
     @State private var isHovered = false
+    private var theme: ThemeResolver { pairPhoneTheme() }
 
     var body: some View {
         Button {
@@ -21,26 +26,26 @@ struct PairPhoneRow: View {
             HStack(spacing: 10) {
                 Image(systemName: "iphone.radiowaves.left.and.right")
                     .font(.system(size: 12))
-                    .opacity(isHovered ? 1 : 0.6)
+                    .foregroundColor(isHovered ? theme.primaryText : theme.secondaryText)
                     .frame(width: 16)
 
                 Text("Pair iPhone")
                     .font(.system(size: 13, weight: .medium))
-                    .opacity(isHovered ? 1 : 0.7)
+                    .foregroundColor(isHovered ? theme.primaryText : theme.secondaryText)
 
                 Spacer()
 
                 if syncManager.isEnabled {
                     HStack(spacing: 3) {
-                        Circle().fill(NotchMenuView.brandLime).frame(width: 5, height: 5)
+                        Circle().fill(theme.doneColor).frame(width: 5, height: 5)
                         Text("Online")
                             .font(.system(size: 9))
-                            .foregroundColor(NotchMenuView.brandLime.opacity(0.85))
+                            .foregroundColor(theme.doneColor)
                     }
                 } else {
                     Image(systemName: "qrcode")
                         .font(.system(size: 11))
-                        .opacity(0.3)
+                        .foregroundColor(theme.mutedText)
                 }
             }
             .padding(.horizontal, 12)
@@ -48,7 +53,7 @@ struct PairPhoneRow: View {
             .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isHovered ? Color.white.opacity(0.08) : Color.clear)
+                    .fill(isHovered ? theme.overlay.opacity(0.22) : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -317,6 +322,18 @@ private struct QRPairingContentView: View {
             }
             .padding(.top, 4)
         }
+
+        // Redeem code disclosure — collapsed by default. The lime card
+        // surface is visually distinct from the dark panel so the
+        // section uses its own `.limeCard` color tokens (near-black on
+        // black-tinted overlay) instead of the panel's ThemeResolver.
+        Divider()
+            .background(Self.cardText.opacity(0.15))
+            .padding(.top, 4)
+        RedeemCodeSection(
+            syncManager: syncManager,
+            style: .limeCard
+        )
     }
 
     /// Empty state (or edit mode) — lets the user type a server URL inline
@@ -505,6 +522,479 @@ private struct QRPairingContentView: View {
 
         guard let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) else { return }
 
+        qrImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+}
+
+// MARK: - Inline Pair iPhone Panel
+//
+// Displayed directly in the notch plugin panel (no popup). When a server
+// is not yet configured, the screen is dominated by the server-config
+// prompt so users cannot silently skip it (issue #57). Once a server is
+// set, the QR + short code + linked devices list takes over.
+
+struct PairPhonePanelView: View {
+    @ObservedObject private var syncManager = SyncManager.shared
+    @State private var serverDraft = ""
+    @State private var isSavingServer = false
+    @State private var isEditingServer = false
+    @State private var qrImage: NSImage?
+    @State private var deviceName = Host.current().localizedName ?? "Mac"
+    @State private var linkedDevices: [ServerConnection.LinkedDeviceInfo] = []
+    @State private var isUnlinking: String? = nil
+    private var theme: ThemeResolver { pairPhoneTheme() }
+
+    private var serverUrl: String? {
+        let value = SyncManager.shared.serverUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (value?.isEmpty ?? true) ? nil : value
+    }
+
+    private var shortCode: String? { syncManager.shortCode }
+
+    private var isValidDraft: Bool {
+        let s = serverDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty, let u = URL(string: s), let scheme = u.scheme?.lowercased() else { return false }
+        return (scheme == "https" || scheme == "http") && (u.host?.isEmpty == false)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                headerRow
+
+                if let url = serverUrl, !isEditingServer {
+                    pairingSection(serverUrl: url)
+                } else {
+                    serverConfigSection
+                }
+            }
+            .padding(.horizontal, 24)
+            // Top inset ~44pt keeps content clear of the floating back
+            // button pill (PluginContentView overlays it at top-left).
+            // Bottom stays at the spec 16pt.
+            .padding(.top, 44)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            generateQRCode()
+            Task { await refreshLinkedDevices() }
+        }
+        .onChange(of: shortCode) { _, _ in generateQRCode() }
+        .onChange(of: syncManager.connectionState) { _, _ in
+            Task { await refreshLinkedDevices() }
+        }
+    }
+
+    // MARK: - Header
+
+    private var headerRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "iphone.radiowaves.left.and.right")
+                .font(.system(size: 14))
+                .foregroundColor(theme.secondaryText)
+            Text("Pair iPhone")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(theme.primaryText)
+            Spacer()
+            statusPill
+        }
+    }
+
+    @ViewBuilder
+    private var statusPill: some View {
+        switch syncManager.connectionState {
+        case .connected:
+            HStack(spacing: 5) {
+                Circle().fill(theme.doneColor).frame(width: 6, height: 6)
+                Text(L10n.pairPanelOnline)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.doneColor)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Capsule().fill(theme.doneColor.opacity(0.12)))
+        case .connecting, .authenticating:
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.mini).scaleEffect(0.7)
+                Text(L10n.pairPanelConnecting)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.secondaryText)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Capsule().fill(theme.overlay.opacity(0.18)))
+        case .error(let msg):
+            HStack(spacing: 5) {
+                Circle().fill(theme.errorColor).frame(width: 6, height: 6)
+                Text(msg)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.errorColor)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Capsule().fill(theme.errorColor.opacity(0.12)))
+        case .disconnected:
+            HStack(spacing: 5) {
+                Circle().fill(theme.mutedText).frame(width: 6, height: 6)
+                Text(L10n.pairPanelNotConnected)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.mutedText)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Capsule().fill(theme.overlay.opacity(0.18)))
+        }
+    }
+
+    // MARK: - Server config (dominant when unset)
+
+    private var serverConfigSection: some View {
+        VStack(spacing: 14) {
+            // Big server icon
+            ZStack {
+                Circle()
+                    .fill(theme.overlay.opacity(0.16))
+                    .frame(width: 72, height: 72)
+                Image(systemName: "server.rack")
+                    .font(.system(size: 30, weight: .light))
+                    .foregroundColor(theme.secondaryText)
+            }
+            .padding(.top, 4)
+
+            Text(L10n.pairPanelStepServerTitle)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(theme.primaryText)
+
+            Text(L10n.pairPanelStepServerBody)
+                .font(.system(size: 11))
+                .foregroundColor(theme.secondaryText)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8)
+
+            TextField(L10n.pairPanelServerPlaceholder, text: $serverDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(theme.primaryText)
+                .padding(.horizontal, 10).padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(theme.overlay.opacity(0.16))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(theme.border.opacity(0.9), lineWidth: 0.5)
+                )
+                .disabled(isSavingServer)
+
+            HStack(spacing: 8) {
+                if isEditingServer && serverUrl != nil {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            isEditingServer = false
+                            serverDraft = ""
+                        }
+                    } label: {
+                        Text(L10n.pairPanelCancel)
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .foregroundColor(theme.secondaryText)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(theme.overlay.opacity(0.18)))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    saveServerURL()
+                } label: {
+                    HStack(spacing: 6) {
+                        if isSavingServer {
+                            ProgressView().controlSize(.small).scaleEffect(0.7)
+                        }
+                        Text(isSavingServer
+                             ? L10n.pairPanelConnecting
+                             : (isEditingServer ? L10n.pairPanelSave : L10n.pairPanelSaveAndConnect))
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .foregroundColor(isValidDraft ? theme.inverseText : theme.mutedText)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(isValidDraft ? theme.primaryText.opacity(0.92) : theme.overlay.opacity(0.18))
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!isValidDraft || isSavingServer)
+            }
+
+            Text(L10n.pairPanelStoredLocally)
+                .font(.system(size: 10))
+                .foregroundColor(theme.mutedText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12)
+            .padding(.top, 2)
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(theme.overlay.opacity(0.14))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(theme.border.opacity(0.8), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Paired / ready-to-pair section
+
+    @ViewBuilder
+    private func pairingSection(serverUrl url: String) -> some View {
+        VStack(spacing: 12) {
+            scanHeader
+            qrBlock
+            shortCodeBlock
+            serverInfoRow(url: url)
+            // Redeem code is a side concern — disclosure-collapsed by
+            // default so newcomers aren't visually nagged. Power users
+            // with codes click "已有兑换码？" to expand.
+            Divider().background(theme.border.opacity(0.4))
+            RedeemCodeSection(
+                syncManager: syncManager,
+                style: .darkPanel(theme: theme)
+            )
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12).fill(theme.overlay.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.border.opacity(0.7), lineWidth: 0.5))
+    }
+
+    private var scanHeader: some View {
+        VStack(spacing: 4) {
+            Text(L10n.pairPanelStepScanTitle)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(theme.primaryText)
+            Text(L10n.pairPanelStepScanBody)
+                .font(.system(size: 11))
+                .foregroundColor(theme.secondaryText)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var qrBlock: some View {
+        if let qrImage {
+            Image(nsImage: qrImage)
+                .interpolation(.none)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 160, height: 160)
+                .padding(10)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.white))
+        } else {
+            VStack(spacing: 8) {
+                ProgressView().tint(theme.mutedText)
+                Text(L10n.pairPanelGeneratingCode)
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.mutedText)
+            }
+            .frame(width: 180, height: 180)
+            .background(RoundedRectangle(cornerRadius: 10).fill(theme.overlay.opacity(0.16)))
+        }
+    }
+
+    private var shortCodeBlock: some View {
+        VStack(spacing: 4) {
+            Text(L10n.pairPanelShortCodeLabel)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(theme.mutedText)
+            Text(shortCode ?? "------")
+                .font(.system(size: 24, weight: .bold, design: .monospaced))
+                .tracking(4)
+                .foregroundColor(theme.primaryText.opacity(shortCode == nil ? 0.3 : 0.95))
+        }
+    }
+
+    private func serverInfoRow(url: String) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "link")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(L10n.pairPanelServerLabel)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(theme.mutedText)
+                    Text(URL(string: url)?.host ?? url)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(theme.primaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer(minLength: 8)
+
+                Button {
+                    serverDraft = url
+                    withAnimation(.easeInOut(duration: 0.18)) { isEditingServer = true }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(L10n.pairPanelChangeServer)
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(theme.primaryText)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(theme.overlay.opacity(0.22))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .strokeBorder(theme.border.opacity(0.9), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help(L10n.pairPanelChangeServerTooltip)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(theme.overlay.opacity(0.16))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(theme.border.opacity(0.8), lineWidth: 0.5)
+            )
+
+            HStack(spacing: 5) {
+                Image(systemName: "desktopcomputer")
+                    .font(.system(size: 9))
+                Text("\(L10n.pairPanelDeviceLabel) · \(deviceName)")
+                    .font(.system(size: 10))
+            }
+            .foregroundColor(theme.mutedText)
+            .padding(.top, 6)
+        }
+    }
+
+    private var linkedDevicesBlock: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(L10n.pairPanelLinkedDevices)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.mutedText)
+                Spacer()
+                Text("\(linkedDevices.count)")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(theme.mutedText)
+            }
+            .padding(.horizontal, 4).padding(.bottom, 2)
+
+            ForEach(linkedDevices) { device in
+                linkedDeviceRow(device)
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func linkedDeviceRow(_ device: ServerConnection.LinkedDeviceInfo) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: device.kind == "iphone" ? "iphone" : "desktopcomputer")
+                .font(.system(size: 10))
+                .foregroundColor(theme.secondaryText)
+            Text(device.name)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(theme.primaryText)
+                .lineLimit(1)
+            Spacer()
+            Button {
+                Task { await unlinkDevice(device) }
+            } label: {
+                if isUnlinking == device.id {
+                    ProgressView().controlSize(.small).scaleEffect(0.6)
+                } else {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.mutedText)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isUnlinking != nil)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 6).fill(theme.overlay.opacity(0.16)))
+    }
+
+    private func pillContent(icon: String, text: String, trailing: String? = nil) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 9))
+            Text(text).font(.system(size: 10)).lineLimit(1)
+            if let trailing {
+                Image(systemName: trailing).font(.system(size: 8)).opacity(0.7)
+            }
+        }
+        .foregroundColor(theme.secondaryText)
+        .padding(.horizontal, 9).padding(.vertical, 4)
+        .background(Capsule().fill(theme.overlay.opacity(0.18)))
+    }
+
+    // MARK: - Actions
+
+    private func saveServerURL() {
+        let s = serverDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isValidDraft else { return }
+        isSavingServer = true
+        SyncManager.shared.serverUrl = s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            isSavingServer = false
+            withAnimation(.easeInOut(duration: 0.2)) { isEditingServer = false }
+            serverDraft = ""
+        }
+    }
+
+    private func refreshLinkedDevices() async {
+        guard let conn = SyncManager.shared.connection else { return }
+        linkedDevices = await conn.fetchLinkedDevices()
+    }
+
+    private func unlinkDevice(_ device: ServerConnection.LinkedDeviceInfo) async {
+        guard let conn = SyncManager.shared.connection else { return }
+        isUnlinking = device.id
+        do {
+            try await conn.unlinkDevice(device.id)
+            linkedDevices.removeAll { $0.id == device.id }
+        } catch {
+            // ignore
+        }
+        isUnlinking = nil
+    }
+
+    private func generateQRCode() {
+        guard let url = serverUrl else {
+            qrImage = nil
+            return
+        }
+        let payload: [String: String] = [
+            "server": url,
+            "code": shortCode ?? "",
+        ]
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(jsonString.utf8)
+        filter.correctionLevel = "M"
+        guard let outputImage = filter.outputImage else { return }
+        let scaled = outputImage.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return }
         qrImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }

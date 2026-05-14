@@ -26,8 +26,11 @@ actor SessionStore {
     /// Pending file syncs (debounced)
     private var pendingSyncs: [String: Task<Void, Never>] = [:]
 
-    /// Sync debounce interval (100ms)
-    private let syncDebounceNs: UInt64 = 100_000_000
+    /// Sync debounce interval. 50ms (was 100ms) — iPhone users felt the
+    /// lag between Claude finishing a line and seeing it on the app; 50ms
+    /// still coalesces FSEvents bursts effectively while halving the floor
+    /// latency for Mac→iPhone message sync.
+    private let syncDebounceNs: UInt64 = 50_000_000
 
     /// Process liveness checker (injectable for testing)
     private let livenessChecker: ProcessLivenessChecker
@@ -48,6 +51,11 @@ actor SessionStore {
     /// Get current sessions snapshot
     func currentSessions() -> [SessionState] {
         return Array(sessions.values)
+    }
+
+    /// Look up a session by its stable UI identity (pid-sessionId composite).
+    func session(withStableId stableId: String) -> SessionState? {
+        return sessions.values.first(where: { $0.stableId == stableId })
     }
 
     // MARK: - Initialization
@@ -148,6 +156,17 @@ actor SessionStore {
         let sessionId = event.sessionId
         let isNewSession = sessions[sessionId] == nil
         DebugLogger.log("Hook", "\(event.event) status=\(event.status) sid=\(sessionId.prefix(8)) new=\(isNewSession)")
+
+        // Q2: Codex TUI 每次启动都生成一个新 UUIDv7 作为 session_id，matcher
+        // `startup|resume` 让每次 TUI 打开都触发一次 SessionStart。如果据此建
+        // session 条目，用户每开一次 Codex TUI（哪怕还没输入任何 prompt）都会
+        // 多一条空白会话。跳过 Codex 的首次 SessionStart，等真正的
+        // UserPromptSubmit 到来再 createSession。Claude 行为不受影响。
+        if isNewSession && event.source == "codex" && event.event == "SessionStart" {
+            DebugLogger.log("Hook", "skipped Codex SessionStart — wait for UserPromptSubmit")
+            return
+        }
+
         var session = sessions[sessionId] ?? createSession(from: event)
 
         session.pid = event.pid
@@ -188,6 +207,9 @@ actor SessionStore {
             session.tty = tty.replacingOccurrences(of: "/dev/", with: "")
         }
         session.lastActivity = Date()
+        if Self.eventAdvancesTurnNonce(event) {
+            session.currentTurnNonce &+= 1
+        }
 
         if event.status == "ended" {
             session.phase = .ended
@@ -223,6 +245,28 @@ actor SessionStore {
 
         if event.event == "Stop" {
             session.subagentState = SubagentState()
+            // Timestamp the Stop event. CompletionPanelController keys off
+            // this to fire the claudeStop variant. Kept separate from
+            // lastActivity (which bumps on ANY hook) so we don't need to
+            // guess whether a given publisher frame was a completion.
+            //
+            // Dedup: Claude Code emits back-to-back Stop hooks during
+            // network-retry cascades (disconnect → API error → retry → API
+            // error → …). Each retry produces a fresh processing →
+            // waitingForInput transition and another Stop. Collapsing Stops
+            // for the same Claude work turn prevents the completion panel
+            // (and downstream consumers) from firing twice when Claude later
+            // emits a follow-up Stop for the hook's own return path.
+            let now = Date()
+            if session.lastCompletedTurnNonce == session.currentTurnNonce {
+                let delta = session.lastStopAt.map { now.timeIntervalSince($0) } ?? 0
+                DebugLogger.log("Store", "Stop deduped same-turn (Δ=\(String(format: "%.2f", delta))s) sid=\(sessionId.prefix(8)) nonce=\(session.currentTurnNonce)")
+            } else if let prev = session.lastStopAt, now.timeIntervalSince(prev) < 3.0 {
+                DebugLogger.log("Store", "Stop deduped short-window (Δ=\(String(format: "%.2f", now.timeIntervalSince(prev)))s) sid=\(sessionId.prefix(8))")
+            } else {
+                session.lastStopAt = now
+                session.lastCompletedTurnNonce = session.currentTurnNonce
+            }
         }
 
         // Parse conversationInfo only when needed (not on every event — too expensive for large JSONL)
@@ -264,6 +308,15 @@ actor SessionStore {
             isInTmux: false,  // Will be updated
             phase: .idle
         )
+    }
+
+    private static func eventAdvancesTurnNonce(_ event: HookEvent) -> Bool {
+        switch event.event {
+        case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+            return true
+        default:
+            return false
+        }
     }
 
     private func processToolTracking(event: HookEvent, session: inout SessionState) {
@@ -722,7 +775,7 @@ actor SessionStore {
                 }
             }
 
-            session.chatItems.sort { $0.timestamp < $1.timestamp }
+            sortChatItemsInDisplayOrder(&session.chatItems)
         }
 
         session.toolTracker.lastSyncTime = Date()
@@ -1033,6 +1086,38 @@ actor SessionStore {
 
     // MARK: - History Loading
 
+    private static func sanitizedCodexPreview(_ text: String?, maxLength: Int) -> String? {
+        guard let text else { return nil }
+
+        var cleaned = text
+        cleaned = cleaned.replacingOccurrences(
+            of: #"<image\b[^>]*>"#,
+            with: "",
+            options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(
+            of: #"</image>"#,
+            with: "",
+            options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(
+            of: #"\[Image #[^\]]+\]"#,
+            with: "",
+            options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(
+            of: #"\s+"#,
+            with: " ",
+            options: .regularExpression
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleaned.isEmpty else { return nil }
+        if cleaned.count > maxLength {
+            return String(cleaned.prefix(maxLength - 3)) + "..."
+        }
+        return cleaned
+    }
+
     private func loadHistoryFromFile(sessionId: String, cwd: String) async {
         // Codex sessions: parse rollout JSONL instead of Claude JSONL
         if let transcriptPath = sessions[sessionId]?.codexTranscriptPath, !transcriptPath.isEmpty {
@@ -1041,11 +1126,11 @@ actor SessionStore {
             let lastUserMsg = messages.last(where: { $0.role == .user })
             let conversationInfo = ConversationInfo(
                 summary: nil,
-                lastMessage: messages.last?.textContent,
+                lastMessage: Self.sanitizedCodexPreview(messages.last?.textContent, maxLength: 80),
                 lastMessageRole: messages.last?.role.rawValue,
                 lastToolName: nil,
-                firstUserMessage: firstUserMsg?.textContent,
-                latestUserMessage: lastUserMsg?.textContent,
+                firstUserMessage: Self.sanitizedCodexPreview(firstUserMsg?.textContent, maxLength: 50),
+                latestUserMessage: Self.sanitizedCodexPreview(lastUserMsg?.textContent, maxLength: 60),
                 lastUserMessageDate: lastUserMsg?.timestamp
             )
             await process(.historyLoaded(
@@ -1126,10 +1211,12 @@ actor SessionStore {
 
         DebugLogger.log("HistLoad", "Added \(addedCount) items, total=\(session.chatItems.count)")
 
-        // Sort by timestamp
-        session.chatItems.sort { $0.timestamp < $1.timestamp }
+        // Preserve source order for same-timestamp items so the latest
+        // user/assistant turn does not get scrambled in quick panel summary.
+        sortChatItemsInDisplayOrder(&session.chatItems)
 
         sessions[sessionId] = session
+        publishState()
     }
 
     // MARK: - File Sync Scheduling
@@ -1185,11 +1272,11 @@ actor SessionStore {
             let lastUserMsg = messages.last(where: { $0.role == .user })
             let conversationInfo = ConversationInfo(
                 summary: nil,
-                lastMessage: messages.last?.textContent,
+                lastMessage: Self.sanitizedCodexPreview(messages.last?.textContent, maxLength: 80),
                 lastMessageRole: messages.last?.role.rawValue,
                 lastToolName: nil,
-                firstUserMessage: firstUserMsg?.textContent,
-                latestUserMessage: lastUserMsg?.textContent,
+                firstUserMessage: Self.sanitizedCodexPreview(firstUserMsg?.textContent, maxLength: 50),
+                latestUserMessage: Self.sanitizedCodexPreview(lastUserMsg?.textContent, maxLength: 60),
                 lastUserMessageDate: lastUserMsg?.timestamp
             )
             await self?.process(.historyLoaded(
@@ -1206,6 +1293,15 @@ actor SessionStore {
     private func cancelPendingSync(sessionId: String) {
         pendingSyncs[sessionId]?.cancel()
         pendingSyncs.removeValue(forKey: sessionId)
+    }
+
+    private func sortChatItemsInDisplayOrder(_ items: inout [ChatHistoryItem]) {
+        items = items.enumerated().sorted { lhs, rhs in
+            if lhs.element.timestamp != rhs.element.timestamp {
+                return lhs.element.timestamp < rhs.element.timestamp
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     // MARK: - State Publishing

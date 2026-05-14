@@ -53,19 +53,20 @@ struct NotchLiveEditOverlay: View {
     /// session, so the controller that created the panel can tear
     /// down the window.
     var onExit: () -> Void = {}
+    private var theme: ThemeResolver {
+        ThemeResolver(theme: store.customization.theme)
+    }
 
     private let neonGreen = Color(hex: "CAFF00")
     private let neonPink  = Color(hex: "FB7185")
 
-    /// Approximate visible notch height. The hardware notch is
-    /// ~37pt; in opened state the panel is much taller, but for
-    /// edit-mode visuals (dashed border + drag-catcher) we anchor
-    /// to the closed-state height so the interactive region matches
-    /// the resting visual.
+    /// Visible notch height used for the edit-mode dashed border,
+    /// drag-catcher, and arrow anchor points. Always tracks the
+    /// user-set `geo.notchHeight` — even on hardware-notched
+    /// MacBooks, the software Mio Island can be taller or shorter
+    /// than the physical camera cutout, so the editor must reflect
+    /// the user's change rather than pinning to a hardcoded 38.
     private var visibleNotchHeight: CGFloat {
-        if hasHardwareNotch {
-            return 38
-        }
         let geo = store.customization.geometry(for: screenID)
         return NotchHardwareDetector.clampedHeight(geo.notchHeight)
     }
@@ -174,7 +175,7 @@ struct NotchLiveEditOverlay: View {
                 //    used to mutate `horizontalOffset` in real time.
                 if subMode == .drag {
                     Rectangle()
-                        .fill(Color.white.opacity(0.001))
+                        .fill(theme.overlay.opacity(0.001))
                         .frame(
                             width: visibleNotchWidth + 16,
                             height: visibleNotchHeight + 12
@@ -217,11 +218,11 @@ struct NotchLiveEditOverlay: View {
                 //    label below the height arrows so it doesn't overlap.
                 Text(readoutText)
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(theme.secondaryText)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
                     .background(
-                        Capsule().fill(Color.black.opacity(0.6))
+                        Capsule().fill(theme.overlay.opacity(0.9))
                     )
                     .position(x: notchCenterX, y: visibleNotchHeight + 44)
                     .accessibilityHidden(true)
@@ -284,7 +285,7 @@ struct NotchLiveEditOverlay: View {
                                 Text(L10n.notchEditSave)
                                     .font(.system(size: 12, weight: .bold))
                             }
-                            .foregroundColor(.black)
+                            .foregroundColor(theme.inverseText)
                             .padding(.horizontal, 22)
                             .padding(.vertical, 8)
                             .background(RoundedRectangle(cornerRadius: 8).fill(neonGreen))
@@ -303,7 +304,7 @@ struct NotchLiveEditOverlay: View {
                                 Text(L10n.notchEditCancel)
                                     .font(.system(size: 12, weight: .bold))
                             }
-                            .foregroundColor(.black)
+                            .foregroundColor(theme.inverseText)
                             .padding(.horizontal, 22)
                             .padding(.vertical, 8)
                             .background(RoundedRectangle(cornerRadius: 8).fill(neonPink))
@@ -327,7 +328,7 @@ struct NotchLiveEditOverlay: View {
         } label: {
             Image(systemName: direction < 0 ? "chevron.left" : "chevron.right")
                 .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.black)
+                .foregroundColor(theme.inverseText)
                 .frame(width: 32, height: 32)
                 .background(Circle().fill(neonGreen))
                 .shadow(color: neonGreen.opacity(0.45), radius: 6)
@@ -338,20 +339,22 @@ struct NotchLiveEditOverlay: View {
     }
 
     private func heightArrowButton(direction: Int, label: String) -> some View {
+        // Always enabled — even on hardware-notched MacBooks, the
+        // software Mio Island can be taller or shorter than the
+        // physical camera cutout, so users get to pick.
         Button {
             applyHeightStep(direction: direction)
         } label: {
             Image(systemName: direction > 0 ? "chevron.down" : "chevron.up")
                 .font(.system(size: 14, weight: .bold))
-                .foregroundColor(hasHardwareNotch ? .white.opacity(0.35) : .black)
+                .foregroundColor(theme.inverseText)
                 .frame(width: 32, height: 32)
-                .background(Circle().fill(hasHardwareNotch ? Color.black.opacity(0.5) : neonGreen))
-                .shadow(color: hasHardwareNotch ? .clear : neonGreen.opacity(0.45), radius: 6)
+                .background(Circle().fill(neonGreen))
+                .shadow(color: neonGreen.opacity(0.45), radius: 6)
         }
         .buttonStyle(.plain)
-        .disabled(hasHardwareNotch)
         .accessibilityLabel(label)
-        .accessibilityHint(hasHardwareNotch ? "Disabled: hardware notch height is fixed" : "Hold Command for a larger step, hold Option for a finer step.")
+        .accessibilityHint("Hold Command for a larger step, hold Option for a finer step.")
     }
 
     private func applyHeightStep(direction: Int) {
@@ -425,12 +428,16 @@ struct NotchLiveEditOverlay: View {
                 Text(title)
                     .font(.system(size: 11, weight: .semibold))
             }
-            .foregroundColor(enabled ? (highlight ? .black : .white) : .white.opacity(0.35))
+            .foregroundColor(
+                enabled
+                    ? (highlight ? theme.inverseText : theme.primaryText)
+                    : theme.mutedText
+            )
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 7)
-                    .fill(highlight ? neonGreen : Color.black.opacity(0.85))
+                    .fill(highlight ? neonGreen : theme.overlay.opacity(0.92))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 7)

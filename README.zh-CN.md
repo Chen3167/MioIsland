@@ -123,7 +123,7 @@ MioIsland 现在自带**插件系统**，配套的插件市场托管在 **[miomi
 | **Terminal.app** | 激活 | ✅ |
 | Warp / VS Code / Cursor / Zed / Kitty / WezTerm / Alacritty | 激活 | - |
 
-> 推荐搭配 **[cmux](https://cmux.io)** —— 精确跳转 + 快捷回复 + 智能抑制，多会话管理的最佳拍档。
+> 推荐搭配 **[cmux](https://cmux.com)** —— 精确跳转 + 快捷回复 + 智能抑制，多会话管理的最佳拍档。
 
 ---
 
@@ -132,7 +132,7 @@ MioIsland 现在自带**插件系统**，配套的插件市场托管在 **[miomi
 ### Homebrew（推荐）
 
 ```bash
-brew install --cask xmqywx/codeisland/codeisland
+brew install xmqywx/codeisland/codeisland
 ```
 
 cask 会自动处理 Gatekeeper,装完直接双击打开即可。
@@ -141,10 +141,10 @@ cask 会自动处理 Gatekeeper,装完直接双击打开即可。
 
 从 [Releases](https://github.com/MioMioOS/MioIsland/releases) 下载最新 `.zip` → 解压 → 拖到「应用程序」。
 
-CodeIsland 为**未签名**构建,macOS Gatekeeper 会拦截首次打开。二选一:
+MioIsland 为**未签名**构建,macOS Gatekeeper 会拦截首次打开。二选一:
 
-- **右键** `Code Island.app` → **打开** → 再点**打开**,或者
-- 终端运行一次: `xattr -dr com.apple.quarantine "/Applications/Code Island.app"`
+- **右键** `Mio Island.app` → **打开** → 再点**打开**,或者
+- 终端运行一次: `xattr -dr com.apple.quarantine "/Applications/Mio Island.app"`
 
 之后双击直接开。
 
@@ -152,15 +152,15 @@ CodeIsland 为**未签名**构建,macOS Gatekeeper 会拦截首次打开。二�
 
 ### HTTP 代理(国内网络受限环境)
 
-`设置 → 通用 → Anthropic API Proxy` 可以让 Code Island 对 Anthropic API 的请求都走你本地的 HTTP 代理(比如 `http://127.0.0.1:7890`)。在本地跑 Clash / V2Ray 的开发者,直连不稳时用得上。
+`设置 → 通用 → Anthropic API Proxy` 可以让 Mio Island 对 Anthropic API 的请求都走你本地的 HTTP 代理(比如 `http://127.0.0.1:7890`)。在本地跑 Clash / V2Ray 的开发者,直连不稳时用得上。
 
 **这个设置**会被应用到:
 - ✅ 刘海里的额度条(`RateLimitMonitor` → `api.anthropic.com/api/oauth/usage`)
-- ✅ **CodeIsland 启动的所有子进程** —— 包括 Stats 插件的 `claude` CLI、未来任何插件的 shell-out。Code Island 在启动时给自己的进程 `setenv` 一次 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`,所有子进程自动继承,不需要每个插件单独适配
+- ✅ **MioIsland 启动的所有子进程** —— 包括 Stats 插件的 `claude` CLI、未来任何插件的 shell-out。Mio Island 在启动时给自己的进程 `setenv` 一次 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`,所有子进程自动继承,不需要每个插件单独适配
 - ❌ **不**作用于 CodeLight iPhone 同步(我们自己的服务器 `island.wdao.chat`,直连最快,走代理反而增加延迟和故障点)
 - ❌ **不**作用于第三方插件自己用 `URLSession` 调用外部 API —— 那种走系统偏好设置(系统设置 → 网络 → 代理),不读这里的值
 
-**不需要**跑 `launchctl setenv HTTPS_PROXY ...` —— 在 Settings 里填上就够了,作用范围精准只覆盖 CodeIsland 自己。不填就是直连。
+**不需要**跑 `launchctl setenv HTTPS_PROXY ...` —— 在 Settings 里填上就够了,作用范围精准只覆盖 MioIsland 自己。不填就是直连。
 
 <details>
 <summary><b>从源码构建</b></summary>
@@ -195,7 +195,7 @@ xcodebuild -project ClaudeIsland.xcodeproj -scheme ClaudeIsland \
 |------|------|
 | [Code Light](https://github.com/MioMioOS/CodeLight) | iPhone 伴侣应用 |
 | [MioServer](https://github.com/MioMioOS/MioServer) | 自托管中继服务器 |
-| [cmux](https://cmux.io) | 推荐的终端复用器 |
+| [cmux](https://cmux.com) | 推荐的终端复用器 |
 
 ---
 
@@ -209,7 +209,7 @@ xcodebuild -project ClaudeIsland.xcodeproj -scheme ClaudeIsland \
 
 - **邮箱** xmqywx@gmail.com
 
-<img src="docs/wechat-qr-kris.jpg" width="140" alt="微信 - Kris" />  <img src="docs/wechat-qr.jpg" width="140" alt="微信 - Carey" />
+<img src="docs/wechat-qr-kris.jpg" width="140" alt="微信 - Kris" />  <img src="docs/wechat-qr.jpg" width="140" alt="微信 - Carey" />  <img src="docs/wechat-group-qr.jpg" width="140" alt="MioIsland 用户群" />
 
 ---
 

@@ -29,6 +29,7 @@ enum NotchContentType: Equatable {
     case chat(SessionState)
     case question(SessionState)
     case plugin(String)  // plugin ID
+    case completion(CompletionEntry)      // Completion Panel — spec §5.6
 
     var id: String {
         switch self {
@@ -37,6 +38,7 @@ enum NotchContentType: Equatable {
         case .chat(let session): return "chat-\(session.sessionId)"
         case .question(let session): return "question-\(session.sessionId)"
         case .plugin(let pluginId): return "plugin-\(pluginId)"
+        case .completion(let entry): return "completion-\(entry.id)"
         }
     }
 }
@@ -126,14 +128,28 @@ class NotchViewModel: ObservableObject {
                 width: min(screenRect.width * 0.4, 480),
                 height: 320
             )
-        case .plugin:
-            return CGSize(
+        case .plugin(let pluginId):
+            // Default budget for plugins that don't declare a preferred size
+            // (48% of screen width capped at 620, 78% of height capped at 780).
+            let defaultSize = CGSize(
                 width: min(screenRect.width * 0.48, 620),
                 height: min(screenRect.height * 0.78, 780)
             )
+            // Let a plugin request a smaller (or slightly larger) panel via
+            // Info.plist: MioPluginPreferredWidth / MioPluginPreferredHeight.
+            // The hint is already sanity-clamped by NativePluginManager; we
+            // still clip to the actual display so a plugin can't escape the
+            // user's screen.
+            if let hint = NativePluginManager.shared.plugin(id: pluginId)?.preferredPanelSize {
+                return CGSize(
+                    width: min(hint.width, screenRect.width * 0.95),
+                    height: min(hint.height, screenRect.height * 0.95)
+                )
+            }
+            return defaultSize
         case .instances:
-            let baseHeight: CGFloat = 100
-            let perSession: CGFloat = 65
+            let baseHeight: CGFloat = 120
+            let perSession: CGFloat = 100
             let contentHeight = baseHeight + CGFloat(sessionCount) * perSession
             // ≤4 sessions: fit content + room for buddy; >4: capped unless expanded
             let compactMax: CGFloat = 360
@@ -148,6 +164,20 @@ class NotchViewModel: ObservableObject {
                 width: min(screenRect.width * 0.4, 480),
                 height: max(height, 200)
             )
+        case .completion(let entry):
+            switch entry.variant {
+            case .claudeStop:
+                return CGSize(width: min(screenRect.width * 0.5, 600), height: 214)
+            case .subagentDone(let subagents):
+                let rowHeight: CGFloat = 28
+                let padding: CGFloat = 120
+                return CGSize(
+                    width: min(screenRect.width * 0.5, 600),
+                    height: min(CGFloat(subagents.count) * rowHeight + padding, 500)
+                )
+            case .pendingTool:
+                return CGSize(width: min(screenRect.width * 0.5, 600), height: 200)
+            }
         }
     }
 
@@ -372,7 +402,14 @@ class NotchViewModel: ObservableObject {
             return
         }
 
-        // Restore chat session if we had one open before
+        // Spec §1 (Completion Panel v2): instances list / chat = manual
+        // user action only. Hover should NOT auto-restore a previous chat
+        // session — that produced the "old chat detail pops up" regression
+        // the user flagged during smoke. Only .click explicitly restores
+        // a saved chat; hover goes to instances list (default contentType).
+        guard reason == .click else { return }
+
+        // Restore chat session if we had one open before (click only)
         if let chatSession = currentChatSession {
             // Avoid unnecessary updates if already showing this chat
             if case .chat(let current) = contentType, current.sessionId == chatSession.sessionId {

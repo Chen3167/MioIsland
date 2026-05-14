@@ -12,9 +12,16 @@ struct AskUserQuestionView: View {
     let session: SessionState
     let context: QuestionContext
     @ObservedObject var sessionMonitor: ClaudeSessionMonitor
+    /// Called when the user taps the header X. Hides this view in the
+    /// parent (back to the regular instances list); does NOT send any
+    /// keystrokes to the CLI — the underlying Claude session keeps
+    /// waiting until the user answers via terminal or another device.
+    var onDismiss: (() -> Void)? = nil
+    @ObservedObject private var notchStore: NotchCustomizationStore = .shared
     @State private var customTexts: [Int: String] = [:]  // per-question custom text
     @State private var hoveredKey: String? = nil
     @State private var isSending: Bool = false
+    private var theme: ThemeResolver { ThemeResolver(theme: notchStore.customization.theme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -24,6 +31,17 @@ struct AskUserQuestionView: View {
                     .notchFont(11, weight: .semibold)
                     .notchSecondaryForeground()
                 Spacer()
+                if let onDismiss {
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(theme.secondaryText.opacity(0.5))
+                            .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Hide this question — CLI still waits for your reply")
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -53,15 +71,15 @@ struct AskUserQuestionView: View {
                             Text("Submit")
                                 .notchFont(10, weight: .medium)
                         }
-                        .foregroundColor(TerminalColors.amber)
+                        .foregroundColor(theme.needsYouColor)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                         .background(
                             RoundedRectangle(cornerRadius: 6)
-                                .fill(TerminalColors.amber.opacity(0.1))
+                                .fill(theme.needsYouColor.opacity(0.1))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 6)
-                                        .strokeBorder(TerminalColors.amber.opacity(0.2), lineWidth: 0.5)
+                                        .strokeBorder(theme.needsYouColor.opacity(0.2), lineWidth: 0.5)
                                 )
                         )
                     }
@@ -75,15 +93,15 @@ struct AskUserQuestionView: View {
                             Text("Cancel")
                                 .notchFont(10, weight: .medium)
                         }
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(theme.secondaryText.opacity(0.7))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                         .background(
                             RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(0.04))
+                                .fill(theme.primaryText.opacity(0.04))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 6)
-                                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                                        .strokeBorder(theme.primaryText.opacity(0.08), lineWidth: 0.5)
                                 )
                         )
                     }
@@ -113,7 +131,7 @@ struct AskUserQuestionView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(question.question)
                 .notchFont(12, weight: .semibold)
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(theme.primaryText.opacity(0.9))
                 .padding(.bottom, 2)
 
             ForEach(Array(question.options.enumerated()), id: \.offset) { index, option in
@@ -141,22 +159,22 @@ struct AskUserQuestionView: View {
             HStack(spacing: 8) {
                 Text("\(optionIndex)")
                     .notchFont(10, weight: .bold)
-                    .foregroundColor(TerminalColors.amber)
+                    .foregroundColor(theme.needsYouColor)
                     .frame(width: 18, height: 18)
                     .background(
                         RoundedRectangle(cornerRadius: 4)
-                            .fill(TerminalColors.amber.opacity(0.15))
+                            .fill(theme.needsYouColor.opacity(0.15))
                     )
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(option.label)
                         .notchFont(11, weight: .medium)
-                        .foregroundColor(.white.opacity(0.85))
+                        .foregroundColor(theme.primaryText.opacity(0.85))
 
                     if let desc = option.description, !desc.isEmpty {
                         Text(desc)
                             .notchFont(9, weight: .regular)
-                            .foregroundColor(.white.opacity(0.35))
+                            .foregroundColor(theme.secondaryText.opacity(0.5))
                             .lineLimit(1)
                     }
                 }
@@ -165,17 +183,17 @@ struct AskUserQuestionView: View {
 
                 Image(systemName: "arrow.right")
                     .notchFont(8)
-                    .foregroundColor(.white.opacity(isHovered ? 0.5 : 0.15))
+                    .foregroundColor(theme.secondaryText.opacity(isHovered ? 0.7 : 0.25))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isHovered ? TerminalColors.amber.opacity(0.08) : Color.white.opacity(0.03))
+                    .fill(isHovered ? theme.needsYouColor.opacity(0.08) : theme.primaryText.opacity(0.03))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(
-                                isHovered ? TerminalColors.amber.opacity(0.2) : Color.white.opacity(0.06),
+                                isHovered ? theme.needsYouColor.opacity(0.2) : theme.primaryText.opacity(0.06),
                                 lineWidth: 0.5
                             )
                     )
@@ -204,10 +222,10 @@ struct AskUserQuestionView: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(theme.primaryText.opacity(0.06))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+                            .strokeBorder(theme.primaryText.opacity(0.1), lineWidth: 0.5)
                     )
             )
             .onSubmit { submitOtherForQuestion(questionIndex: questionIndex, optionCount: optionCount) }
@@ -219,8 +237,8 @@ struct AskUserQuestionView: View {
                     .font(.system(size: 18))
                     .foregroundColor(
                         (customTexts[questionIndex] ?? "").isEmpty || isSending
-                            ? Color.white.opacity(0.15)
-                            : TerminalColors.amber
+                            ? theme.secondaryText.opacity(0.2)
+                            : theme.needsYouColor
                     )
             }
             .buttonStyle(.plain)
@@ -240,15 +258,15 @@ struct AskUserQuestionView: View {
                 Text("Jump to Terminal")
                     .notchFont(10, weight: .medium)
             }
-            .foregroundColor(.white.opacity(0.5))
+            .foregroundColor(theme.secondaryText.opacity(0.7))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.white.opacity(0.04))
+                    .fill(theme.primaryText.opacity(0.04))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                            .strokeBorder(theme.primaryText.opacity(0.08), lineWidth: 0.5)
                     )
             )
             .contentShape(Rectangle())

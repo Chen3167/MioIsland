@@ -30,12 +30,21 @@ enum NotchHardwareDetector {
     }
 
     /// Width of the hardware notch in points, derived from the
-    /// screen's safe-area insets. Returns zero when there is no
+    /// screen's auxiliary top areas (the menu-bar strips on either
+    /// side of the camera cutout). Returns zero when there is no
     /// hardware notch (or when the mode is `.forceVirtual`).
+    ///
+    /// NOTE: We intentionally do NOT use `safeAreaInsets.left/right`
+    /// here — on macOS those are always 0 (safeAreaInsets.top alone
+    /// signals the notch). Using them produced a notch width equal
+    /// to the full screen width and the live-edit dashed border
+    /// stretched across the entire display. See Ext+NSScreen.swift
+    /// for the authoritative way to compute notch geometry.
     static func hardwareNotchWidth(on screen: NSScreen?, mode: HardwareNotchMode) -> CGFloat {
         guard hasHardwareNotch(on: screen, mode: mode), let screen else { return 0 }
-        let insets = screen.safeAreaInsets
-        return screen.frame.width - insets.left - insets.right
+        let leftPadding = screen.auxiliaryTopLeftArea?.width ?? 0
+        let rightPadding = screen.auxiliaryTopRightArea?.width ?? 0
+        return screen.frame.width - leftPadding - rightPadding
     }
 
     // MARK: - Auto-width clamp formula (pure, unit-testable)

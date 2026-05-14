@@ -108,16 +108,16 @@ enum L10n {
     static var anthropicApiProxyDescription: String {
         tr(
             """
-            Applies to: the rate-limit bar (api.anthropic.com) and every subprocess CodeIsland spawns — including the Stats plugin's claude CLI and any future plugin's shell-outs. We set HTTPS_PROXY / HTTP_PROXY / ALL_PROXY on CodeIsland's own process once at startup, so children inherit it automatically. No launchctl pollution, no per-plugin opt-in.
+            Applies to: the rate-limit bar (api.anthropic.com) and every subprocess MioIsland spawns — including the Stats plugin's claude CLI and any future plugin's shell-outs. HTTPS_PROXY / HTTP_PROXY / ALL_PROXY are set once at startup, all children inherit automatically.
 
-            Does NOT apply to: CodeLight sync (our own server, stays direct), or third-party plugins that use their own URLSession to reach external APIs — those honor system proxy settings instead.
+            Does NOT apply to: CodeLight sync (always direct) or third-party plugin URLSession calls (those use system proxy).
 
             Leave empty for direct connection.
             """,
             """
-            作用于:刘海额度条(api.anthropic.com)和 CodeIsland 启动的所有子进程 —— 包括 Stats 插件的 claude CLI、未来任何插件的 shell-out。我们在启动时给 CodeIsland 自身进程 `setenv` 一次 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY,所有子进程自动继承。不污染全局,不需要每个插件单独适配。
+            作用于：刘海额度条 (api.anthropic.com) 和 MioIsland 启动的所有子进程，包括 Stats 插件的 claude CLI。启动时设置一次 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY，子进程自动继承。
 
-            不作用于:CodeLight 同步(我们自己的服务器,始终直连);以及第三方插件自己用 URLSession 调用外部 API 的场景(那种走系统代理设置)。
+            不作用于：CodeLight 同步（始终直连）、第三方插件的 URLSession 调用（走系统代理）。
 
             留空即直连。
             """
@@ -146,16 +146,85 @@ enum L10n {
     static var back: String { tr("Back", "返回") }
     static var groupByProject: String { tr("Group by Project", "按项目分组") }
     static var pixelCatMode: String { tr("Pixel Cat Mode", "像素猫模式") }
+    static var notchBuddyStyle: String { tr("Buddy Style", "Buddy 样式") }
+    static var notchBuddyPixelCat: String { tr("Cat", "像素猫") }
+    static var notchBuddyEmoji: String { tr("Emoji", "Emoji") }
+    static var notchBuddyNeon: String { tr("Neon", "霓虹") }
     static var launchAtLogin: String { tr("Launch at Login", "开机启动") }
     static var hooks: String { tr("Hooks", "钩子") }
+    // Hook diagnostics (Advanced tab)
+    static var hookDiagTitle: String { tr("Hook Diagnostics", "Hook 诊断") }
+    static var hookDiagSubtitle: String { tr("Inspect and repair Claude and Codex hook installation.", "检查并修复 Claude 与 Codex 的 hook 安装状态。") }
+    static var hookDiagAgentClaude: String { tr("Claude Code", "Claude Code") }
+    static var hookDiagAgentCodex: String { tr("Codex", "Codex") }
+    static var hookDiagHealthy: String { tr("All good", "一切正常") }
+    static var hookDiagDisabled: String { tr("Not enabled", "未启用") }
+    static func hookDiagErrorCount(_ n: Int) -> String {
+        isChinese ? "\(n) 个错误" : "\(n) error\(n == 1 ? "" : "s")"
+    }
+    static func hookDiagNoticeCount(_ n: Int) -> String {
+        isChinese ? "\(n) 条提示" : "\(n) notice\(n == 1 ? "" : "s")"
+    }
+    static var hookDiagRecheck: String { tr("Re-check", "重新检查") }
+    static var hookDiagReinstall: String { tr("Reinstall", "重新安装") }
+    static var hookDiagUninstall: String { tr("Uninstall", "卸载") }
+    static var hookDiagRepair: String { tr("Auto-repair", "一键修复") }
+    static var hookDiagCleanupLegacy: String { tr("Clean up legacy hooks", "清理遗留 hooks") }
+    static var hookDiagCleanupLegacyHint: String { tr("Remove leftover scripts and config entries from earlier app versions (Claude Island, Code Island).", "移除 Claude Island / Code Island 旧版本遗留的脚本与配置。") }
+    static var hookDiagCodexDisabledHint: String { tr("Codex is turned off. Enable it in the General tab to install its hooks.", "Codex 未启用。请到「通用」标签打开后再安装 hook。") }
+    static var hookDiagIssueScriptMissing: String { tr("Hook script file is missing", "Hook 脚本文件缺失") }
+    static var hookDiagIssueScriptNotExecutable: String { tr("Hook script exists but is not executable", "Hook 脚本无执行权限") }
+    static var hookDiagIssueConfigMalformed: String { tr("Config file contains invalid JSON", "配置文件 JSON 损坏") }
+    static var hookDiagIssueStaleCommand: String { tr("Config references a script path that no longer exists", "配置指向的脚本路径已失效") }
+    static var hookDiagIssueOtherHooks: String { tr("Other (non-CodeIsland) hooks also installed", "检测到其他非 CodeIsland 的 hook") }
+    static var hookDiagIssueManifestMissing: String { tr("Install manifest file missing", "安装清单文件缺失") }
+    static var hookDiagCleanupDone: String { tr("Legacy hooks cleaned.", "已清理遗留 hooks。") }
+    static var hookDiagNothingToClean: String { tr("No legacy hooks found.", "没有遗留 hooks。") }
     static var codexSupport: String { tr("Codex Support", "Codex 支持") }
+    static var codexNotifyOnComplete: String { tr("Codex Notifications", "Codex 通知") }
     static var accessibility: String { tr("Accessibility", "辅助功能") }
     static var version: String { tr("Version", "版本") }
+    static var checkForUpdates: String { tr("Check for Updates", "检查更新") }
+    static var standby: String { tr("Standby", "待机中") }
     static var quit: String { tr("Quit", "退出") }
     static var on: String { tr("On", "开") }
     static var off: String { tr("Off", "关") }
     static var enable: String { tr("Enable", "启用") }
     static var enabled: String { tr("On", "已开启") }
+
+    // MARK: - Completion Panel — phrase defaults
+    static var qrPhraseContinue: String { tr("Continue", "继续") }
+    static var qrPhraseOK: String { tr("OK", "好的") }
+    static var qrPhraseExplain: String { tr("Explain more", "解释一下") }
+    static var qrPhraseRetry: String { tr("Retry", "再试一次") }
+
+    // MARK: - Completion Panel — UI strings
+    static var qrSendFailed: String { tr("Failed to send — terminal unavailable", "发送失败，终端不可用") }
+    static var qrGoToTerminal: String { tr("Go to terminal", "前往终端") }
+    static func qrGoToTerminalNamed(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return qrGoToTerminal }
+        return tr("Go to terminal · \(trimmed)", "前往终端 · \(trimmed)")
+    }
+    static var qrAcknowledge: String { tr("Got it", "知道了") }
+    static var qrClose: String { tr("Close", "关闭") }
+    static var qrReplyPlaceholder: String { tr("Reply directly…", "直接回复…") }
+    static var qrSend: String { tr("Send", "发送") }
+    static func subagentDoneBadge(_ n: Int) -> String { tr("\(n) subagents done", "\(n) 个 subagent 完成") }
+    static var pendingToolAllow: String { tr("Allow", "允许") }
+    static var pendingToolDeny: String { tr("Deny", "拒绝") }
+    static func pendingToolAlwaysAllow(_ name: String) -> String { tr("Always Allow \(name)", "总是允许 \(name)") }
+    static var pendingToolNeedsApproval: String { tr("Needs approval", "需授权") }
+    static var pendingToolHighRiskHint: String { tr("High-risk operation — review diff in terminal", "高风险操作，请到终端查看 diff") }
+
+    // MARK: - Completion Panel — QuickReplyPhrasesEditor
+    static var qrEditorAdd: String { tr("Add phrase", "添加短语") }
+    static var qrEditorReset: String { tr("Reset to defaults", "恢复默认") }
+    static var qrEditorMaxHint: String { tr("Max 6 phrases", "最多 6 条") }
+    static var qrEditorMinHint: String { tr("Keep at least one phrase", "至少保留一条") }
+    static var qrEditorDeleteHint: String { tr("Delete", "删除") }
+    static var qrEditorSectionTitle: String { tr("Quick Reply Phrases", "快速应答短语") }
+    static var completionPanelEnabled: String { tr("Completion Panel", "任务完成面板") }
 
     // MARK: - Settings window
     static var systemSettings: String { tr("System Settings", "系统设置") }
@@ -189,6 +258,10 @@ enum L10n {
     static var testSendFailed: String { tr("Failed — check logs tab", "失败 — 请查看日志 tab") }
     static var openAccessibilitySettings: String { tr("Open Accessibility settings", "打开辅助功能设置") }
     static var openAutomationSettings: String { tr("Open Automation settings", "打开自动化设置") }
+    static var repairPermission: String { tr("Repair", "修复权限") }
+    static var repairing: String { tr("Repairing…", "修复中…") }
+    static var repairAccessibilityPermission: String { tr("Repair Accessibility permission", "修复辅助功能权限") }
+    static var repairAutomationPermission: String { tr("Repair Automation permission", "修复自动化权限") }
     static var refreshStatus: String { tr("Refresh", "刷新") }
     static var requestAutomationButton: String { tr("Request Automation permission", "请求自动化权限") }
     static var requestAutomationNoTerminal: String { tr("No supported terminal is running — start cmux/iTerm/Terminal first", "没有受支持的终端在运行 — 请先启动 cmux/iTerm/Terminal") }
@@ -205,6 +278,149 @@ enum L10n {
     static var logsEmpty: String { tr("Log is empty. Interact with CodeIsland to generate entries.", "日志为空。操作 CodeIsland 会产生日志。") }
     static var pairedIPhones: String { tr("Paired iPhones", "已配对 iPhone") }
     static var pairNewPhone: String { tr("Pair New iPhone", "配对新 iPhone") }
+    // Pair iPhone inline panel
+    static var pairPanelOnline: String { tr("Online", "在线") }
+    static var pairPanelNotConnected: String { tr("Not connected", "未连接") }
+    static var pairPanelConnecting: String { tr("Connecting…", "连接中…") }
+    static var pairPanelStepServerTitle: String { tr("Step 1 · Configure Server", "第 1 步 · 配置服务器") }
+    static var pairPanelStepServerBody: String { tr("Set your CodeLight relay server. Your messages sync through it end-to-end encrypted — the server never sees plaintext. Without this step, the QR code cannot be generated.", "先设置一个 CodeLight 中继服务器。你的消息会通过它端到端加密同步 —— 服务端看不到明文。没配好这一步，下面的二维码不会生成。") }
+    static var pairPanelServerPlaceholder: String { tr("https://your-server.example", "https://你的服务器.example") }
+    static var pairPanelSaveAndConnect: String { tr("Save and Connect", "保存并连接") }
+    static var pairPanelChangeServer: String { tr("Change Server", "更换服务器") }
+    static var pairPanelCancel: String { tr("Cancel", "取消") }
+    static var pairPanelSave: String { tr("Save", "保存") }
+    static var pairPanelStoredLocally: String { tr("The server URL is stored locally and never leaves your Mac.", "服务器地址仅保存在本机，不会外发。") }
+    static var pairPanelStepScanTitle: String { tr("Step 2 · Scan with Code Light", "第 2 步 · 用 Code Light 扫码") }
+    static var pairPanelStepScanBody: String { tr("Open Code Light on iPhone and scan this QR, or enter the short code manually.", "在 iPhone 打开 Code Light，扫描下方二维码，或手动输入配对码。") }
+    static var pairPanelShortCodeLabel: String { tr("Pairing Code", "配对码") }
+    static var pairPanelGeneratingCode: String { tr("Generating pairing code…", "生成配对码中…") }
+    static var pairPanelLinkedDevices: String { tr("Linked Devices", "已连接设备") }
+    static var pairPanelChangeServerTooltip: String { tr("Change server URL", "更换服务器地址") }
+    static var pairPanelServerLabel: String { tr("Server", "服务器") }
+    static var pairPanelDeviceLabel: String { tr("This Mac", "本机") }
+    static var pairPanelServerErrorPrefix: String { tr("Connection error:", "连接错误：") }
+
+    // MARK: - Redeem code (Pair Phone redemption flow)
+    //
+    // Mirrors the server contract for /v1/pairing/redeem-code. Mac is
+    // the redemption point now (Apple 3.1.1 forced this off iOS); the
+    // iPhone inherits trial status via DeviceLink at pair time.
+
+    static var redeemSectionTitle: String { tr("Have a redeem code?", "已有兑换码？") }
+    static var redeemSectionSubtitle: String {
+        tr("Activate the trial on this Mac. Paired iPhones inherit it automatically.",
+           "在本 Mac 激活试用,配对的 iPhone 会自动继承。")
+    }
+    static var redeemPlaceholder: String { tr("FREE-XXXXXXXX", "FREE-XXXXXXXX") }
+    static var redeemButton: String { tr("Activate", "激活") }
+    static var redeemButtonSubmitting: String { tr("Activating…", "激活中…") }
+    static var redeemDisabledOffline: String {
+        tr("Connect to the server first to activate.", "请先连接服务器再激活。")
+    }
+    /// Hero copy for the post-redeem celebration overlay. Kept short so the
+    /// confetti can carry the energy; longer detail rides on the days line
+    /// below it.
+    static var redeemSuccessTitle: String { tr("Activated!", "兑换成功!") }
+    /// Subtitle on the celebration card — "+ N days of trial / 获得 N 天试用".
+    /// Singular vs plural is handled per-locale: Chinese ignores plurals,
+    /// English uses "day" only when N==1.
+    static func redeemSuccessDays(_ d: Int) -> String {
+        if L10n.isChinese {
+            return "获得 \(d) 天试用"
+        }
+        return d == 1 ? "+1 day of trial" : "+\(d) days of trial"
+    }
+    /// Trial-active banner — "已激活(剩余 14 天)" to match iOS App's
+    /// subscription row exactly. Short copy fits on one line in the
+    /// 280pt popup card; expiry date is dropped (caller can show a
+    /// tooltip / detail view if needed). All four banner states use
+    /// the same compact 1-line pattern for visual consistency.
+    static func subscriptionTrialBanner(daysLeft: Int) -> String {
+        if L10n.isChinese {
+            return "已激活(剩余 \(daysLeft) 天)"
+        }
+        return daysLeft == 1
+            ? "Active (1 day left)"
+            : "Active (\(daysLeft) days left)"
+    }
+
+    /// Lifetime/permanent subscription label.
+    static var subscriptionActiveBanner: String {
+        tr("Active", "已激活")
+    }
+
+    /// Trial expired. Banner is red; the redeem disclosure right below
+    /// is the call-to-action — banner doesn't need to repeat the prompt.
+    static var subscriptionExpiredBanner: String {
+        tr("Expired", "已过期")
+    }
+
+    /// No active subscription. Shown when status is .none AND there's
+    /// no recent local redemption record.
+    static var subscriptionNoneBanner: String {
+        tr("Not activated", "未激活")
+    }
+
+    static var subscriptionRefreshTooltip: String {
+        tr("Refresh status", "刷新状态")
+    }
+
+    // Error messages — keys mirror the server's stable `error` field.
+    static var redeemErrorUnauthorized: String {
+        tr("Login expired. Reconnect the server and try again.",
+           "登录态失效,请重新连接服务器后重试。")
+    }
+    static var redeemErrorNotAMac: String {
+        tr("This device isn't recognised as a Mac. Contact support.",
+           "本设备未被识别为 Mac,请联系客服。")
+    }
+    static var redeemErrorInvalidCode: String {
+        tr("Redeem code is invalid.", "兑换码无效。")
+    }
+    static var redeemErrorCodeExhausted: String {
+        tr("This code has been fully redeemed.", "兑换码已被领完。")
+    }
+    static var redeemErrorCodeExpired: String {
+        tr("This code has expired.", "兑换码已过期。")
+    }
+    static var redeemErrorCodeRevoked: String {
+        tr("This code has been revoked.", "此兑换码已被作废。")
+    }
+    static var redeemErrorAlreadyRedeemed: String {
+        tr("This Mac already used this code.", "本 Mac 已使用过这张码。")
+    }
+    static var redeemErrorRateLimited: String {
+        tr("Too many attempts. Please wait an hour and try again.",
+           "失败次数过多,请稍后再试。")
+    }
+    static var redeemErrorServerError: String {
+        tr("Server error. Please try again later.", "服务器繁忙,请稍后重试。")
+    }
+    static var redeemErrorNetwork: String {
+        tr("Network error. Check your connection and try again.",
+           "网络错误,请检查网络后重试。")
+    }
+    static var redeemErrorClientTooOld: String {
+        tr("This version is too old. Please update to continue.",
+           "当前版本过旧,请升级后继续使用。")
+    }
+
+    // MARK: - Upgrade-required alert (HTTP 426 client_too_old)
+
+    static var upgradeRequiredTitle: String {
+        tr("MioIsland update required", "需要升级 MioIsland")
+    }
+    /// Used only when the server response is missing a `message` field.
+    /// Normally the server-sent message wins so admins can change copy
+    /// (e.g. mention a specific version) without shipping a new Mac
+    /// build. Kept version-agnostic so a stale fallback never lies
+    /// about the required version.
+    static var upgradeRequiredFallbackMessage: String {
+        tr("The server requires a newer MioIsland or Code Light client to continue.",
+           "服务器端要求最新版本的 MioIsland 或 Code Light 客户端才能继续使用。")
+    }
+    static var upgradeNow: String { tr("Update Now", "立即升级") }
+    static var upgradeLater: String { tr("Later", "稍后") }
     static var launchPresetsSection: String { tr("Launch Presets", "启动预设") }
     static var addPreset: String { tr("New Preset", "新建预设") }
     static var noPresets: String { tr("No presets yet — tap + to add one", "还没有预设，点击 + 添加") }
@@ -218,6 +434,7 @@ enum L10n {
     static var starOnGitHub: String { tr("Star on GitHub", "GitHub 点星") }
     static var wechatLabel: String { tr("WeChat", "微信") }
     static var maintainedTagline: String { tr("Actively maintained · Your star keeps us going!", "持续更新中 · Star 是我们最大的动力！") }
+    static var quitApp: String { tr("Quit Mio Island", "退出 Mio Island") }
 
     // MARK: - Plugin marketplace
     static var pluginMarketplaceTitle: String { tr("Plugin Marketplace", "插件市场") }
@@ -406,7 +623,6 @@ enum L10n {
     static var smartSuppression: String { tr("Smart Suppression", "智能抑制") }
     static var autoCollapseOnMouseLeave: String { tr("Auto-Collapse on Leave", "离开时自动收起") }
     static var compactCollapsed: String { tr("Compact Notch", "紧凑刘海") }
-
     // MARK: - Notch customization
     //
     // Deviation from spec: the spec (Section 4.5) lists these keys
@@ -418,18 +634,16 @@ enum L10n {
 
     static var notchSectionHeader: String { tr("Notch", "灵动岛") }
     static var notchTheme: String { tr("Theme", "主题") }
+    // v2 theme line-up (2026-04-20): Classic + six themes designed via
+    // Claude Design. Old names (paper, neonLime, cyber, mint, rosegold,
+    // ocean, aurora, mocha, lavender, cherry) were dropped on reset.
     static var notchThemeClassic: String { tr("Classic", "经典") }
-    static var notchThemePaper: String { tr("Paper", "纸张") }
-    static var notchThemeNeonLime: String { tr("Neon Lime", "霓虹青柠") }
-    static var notchThemeCyber: String { tr("Cyber", "赛博") }
-    static var notchThemeMint: String { tr("Mint", "薄荷") }
-    static var notchThemeSunset: String { tr("Sunset", "日落") }
-    static var notchThemeRosegold: String { tr("Rosé Gold", "玫瑰金") }
-    static var notchThemeOcean: String { tr("Ocean", "深海") }
-    static var notchThemeAurora: String { tr("Aurora", "极光") }
-    static var notchThemeMocha: String { tr("Mocha", "摩卡") }
-    static var notchThemeLavender: String { tr("Lavender", "薰衣草") }
-    static var notchThemeCherry: String { tr("Cherry", "樱桃") }
+    static var notchThemeForest: String { tr("Forest", "森林") }
+    static var notchThemeNeonTokyo: String { tr("Night Circuit", "夜行电路") }
+    static var notchThemeSunset: String { tr("Sunset", "落日") }
+    static var notchThemeRetroArcade: String { tr("Retro Arcade", "复古游戏机") }
+    static var notchThemeHighContrast: String { tr("High Contrast", "高对比") }
+    static var notchThemeSakura: String { tr("Pink Mist", "粉雾") }
     static var notchHoverSpeed: String { tr("Hover Speed", "展开速度") }
     static var notchHoverInstant: String { tr("Fast", "即时") }
     static var notchHoverNormal: String { tr("1s", "1秒") }
@@ -456,19 +670,15 @@ enum L10n {
     static var notchEditReset: String { tr("Reset", "复位") }
     static var notchEditPresetDisabledTooltip: String { tr("Your device doesn't have a hardware notch", "你的设备没有硬件刘海") }
     static func notchThemeName(_ id: NotchThemeID) -> String {
-        switch id {
-        case .classic:  return notchThemeClassic
-        case .paper:    return notchThemePaper
-        case .neonLime: return notchThemeNeonLime
-        case .cyber:    return notchThemeCyber
-        case .mint:     return notchThemeMint
-        case .sunset:   return notchThemeSunset
-        case .rosegold: return notchThemeRosegold
-        case .ocean:    return notchThemeOcean
-        case .aurora:   return notchThemeAurora
-        case .mocha:    return notchThemeMocha
-        case .lavender: return notchThemeLavender
-        case .cherry:   return notchThemeCherry
+        switch id.rawValue {
+        case NotchThemeID.classic.rawValue: return notchThemeClassic
+        case NotchThemeID.forest.rawValue: return notchThemeForest
+        case NotchThemeID.neonTokyo.rawValue: return notchThemeNeonTokyo
+        case NotchThemeID.sunset.rawValue: return notchThemeSunset
+        case NotchThemeID.retroArcade.rawValue: return notchThemeRetroArcade
+        case NotchThemeID.highContrast.rawValue: return notchThemeHighContrast
+        case NotchThemeID.sakura.rawValue: return notchThemeSakura
+        default: return ThemeRegistry.shared.displayName(for: id)
         }
     }
 }

@@ -22,14 +22,16 @@ import SwiftUI
 
 struct NotchCustomizationSettingsView: View {
     @ObservedObject private var store: NotchCustomizationStore = .shared
+    @ObservedObject private var themeRegistry = ThemeRegistry.shared
 
-    private static let brandLime = Color(red: 0xCA/255, green: 0xFF/255, blue: 0x00/255)
+    private var theme: ThemeResolver { ThemeResolver(theme: store.customization.theme) }
 
     var body: some View {
         // The enclosing SettingsCard already provides the title,
         // padding, background, and border. We just emit the rows.
         VStack(alignment: .leading, spacing: 8) {
-            themeRow
+            themeSection
+            buddyStyleRow
             fontSizeRow
             hoverSpeedRow
 
@@ -58,47 +60,95 @@ struct NotchCustomizationSettingsView: View {
         }
     }
 
-    // MARK: - Theme picker row
+    // MARK: - Theme picker — grid of preview cards
 
-    private var themeRow: some View {
-        controlRow(icon: "paintpalette", label: L10n.notchTheme) {
-            Menu {
-                ForEach(NotchThemeID.allCases) { id in
-                    Button {
+    /// Header row + 2-column grid of theme cards. Each card shows a mini
+    /// capsule rendered in the target theme's own colors so the user can
+    /// judge the palette at a glance, not just "green dot says Forest".
+    /// Selected card glows with its own accent — each theme announces
+    /// itself the way the Claude Design mock does.
+    private var themeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "paintpalette")
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.mutedText)
+                    .frame(width: 16)
+                Text(L10n.notchTheme)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+                Spacer()
+                Text(L10n.notchThemeName(store.customization.theme))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(NotchPalette.for(store.customization.theme).accent)
+            }
+            .padding(.horizontal, 2)
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: 8),
+                    GridItem(.flexible(), spacing: 8),
+                ],
+                spacing: 8
+            ) {
+                ForEach(themeRegistry.themeIDs) { id in
+                    ThemePreviewCard(
+                        themeID: id,
+                        isSelected: store.customization.theme == id
+                    ) {
                         store.update { $0.theme = id }
-                    } label: {
-                        Label {
-                            Text(L10n.notchThemeName(id))
-                        } icon: {
-                            Circle().fill(NotchPalette.for(id).bg)
-                        }
-                        .accessibilityLabel("\(L10n.notchThemeName(id)) theme")
                     }
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(NotchPalette.for(store.customization.theme).bg)
-                        .overlay(
-                            Circle()
-                                .strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5)
-                        )
-                        .frame(width: 12, height: 12)
-                        .accessibilityHidden(true)
-                    Text(L10n.notchThemeName(store.customization.theme))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.95))
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.5))
-                }
             }
-            .buttonStyle(.plain)
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel(L10n.notchTheme)
         }
+        .padding(.bottom, 4)
+    }
+
+    // MARK: - Buddy style segmented picker row
+
+    /// Two-way segmented picker for which sprite appears in the notch:
+    /// pixel cat (always available) / Claude Code companion emoji. Emoji
+    /// needs `~/.claude.json` to have `companion` data or it falls back
+    /// to the pixel cat at render time. The pick also mirrors into the
+    /// legacy `usePixelCat` AppStorage so ClaudeInstancesView (which
+    /// hasn't been migrated) stays roughly in sync.
+    private var buddyStyleRow: some View {
+        controlRow(icon: "cat", label: L10n.notchBuddyStyle) {
+            HStack(spacing: 0) {
+                buddyStyleSegment(.pixelCat, shortLabel: L10n.notchBuddyPixelCat)
+                buddyStyleSegment(.emoji,    shortLabel: L10n.notchBuddyEmoji)
+            }
+            .padding(2)
+            .background(
+                RoundedRectangle(cornerRadius: 6).fill(theme.overlay.opacity(0.18))
+            )
+        }
+    }
+
+    private func buddyStyleSegment(
+        _ style: BuddyStyle,
+        shortLabel: String
+    ) -> some View {
+        let isSelected = store.customization.buddyStyle == style
+        return Button {
+            store.update { $0.buddyStyle = style }
+            // Keep legacy AppStorage in sync so unmigrated call sites
+            // (ClaudeInstancesView) still render something sensible.
+            UserDefaults.standard.set(style == .pixelCat, forKey: "usePixelCat")
+        } label: {
+            Text(shortLabel)
+                .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                .foregroundColor(isSelected ? theme.inverseText : theme.secondaryText)
+                .frame(minWidth: 36)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(isSelected ? theme.doneColor : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(shortLabel)
     }
 
     // MARK: - Font size segmented picker row
@@ -113,7 +163,7 @@ struct NotchCustomizationSettingsView: View {
             }
             .padding(2)
             .background(
-                RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06))
+                RoundedRectangle(cornerRadius: 6).fill(theme.overlay.opacity(0.18))
             )
         }
     }
@@ -128,13 +178,13 @@ struct NotchCustomizationSettingsView: View {
         } label: {
             Text(shortLabel)
                 .font(.system(size: 11, weight: store.customization.fontScale == scale ? .bold : .medium))
-                .foregroundColor(store.customization.fontScale == scale ? .black : .white.opacity(0.7))
+                .foregroundColor(store.customization.fontScale == scale ? theme.inverseText : theme.secondaryText)
                 .frame(minWidth: 26)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(store.customization.fontScale == scale ? Self.brandLime : Color.clear)
+                        .fill(store.customization.fontScale == scale ? theme.doneColor : Color.clear)
                 )
         }
         .buttonStyle(.plain)
@@ -152,7 +202,7 @@ struct NotchCustomizationSettingsView: View {
             }
             .padding(2)
             .background(
-                RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06))
+                RoundedRectangle(cornerRadius: 6).fill(theme.overlay.opacity(0.18))
             )
         }
     }
@@ -166,13 +216,13 @@ struct NotchCustomizationSettingsView: View {
         } label: {
             Text(shortLabel)
                 .font(.system(size: 11, weight: store.customization.hoverSpeed == speed ? .bold : .medium))
-                .foregroundColor(store.customization.hoverSpeed == speed ? .black : .white.opacity(0.7))
+                .foregroundColor(store.customization.hoverSpeed == speed ? theme.inverseText : theme.secondaryText)
                 .frame(minWidth: 30)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
                 .background(
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(store.customization.hoverSpeed == speed ? Self.brandLime : Color.clear)
+                        .fill(store.customization.hoverSpeed == speed ? theme.doneColor : Color.clear)
                 )
         }
         .buttonStyle(.plain)
@@ -191,27 +241,27 @@ struct NotchCustomizationSettingsView: View {
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(isOn ? 0.9 : 0.5))
+                    .foregroundColor(isOn ? theme.primaryText.opacity(0.9) : theme.mutedText)
                     .frame(width: 16)
                 Text(label)
                     .font(.system(size: 12, weight: isOn ? .semibold : .medium))
-                    .foregroundColor(.white.opacity(isOn ? 0.95 : 0.7))
+                    .foregroundColor(isOn ? theme.primaryText.opacity(0.95) : theme.secondaryText)
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 Circle()
-                    .fill(isOn ? Self.brandLime : Color.white.opacity(0.18))
+                    .fill(isOn ? theme.doneColor : theme.mutedText.opacity(0.45))
                     .frame(width: 7, height: 7)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 7)
-                    .fill(isOn ? Self.brandLime.opacity(0.10) : Color.white.opacity(0.03))
+                    .fill(isOn ? theme.doneColor.opacity(0.10) : theme.overlay.opacity(0.12))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 7)
                     .strokeBorder(
-                        isOn ? Self.brandLime.opacity(0.25) : Color.white.opacity(0.08),
+                        isOn ? theme.doneColor.opacity(0.28) : theme.border.opacity(0.22),
                         lineWidth: 0.5
                     )
             )
@@ -238,10 +288,10 @@ struct NotchCustomizationSettingsView: View {
                             : L10n.notchHardwareForceVirtual
                     )
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(0.95))
+                    .foregroundColor(theme.primaryText.opacity(0.95))
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 9))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(theme.mutedText)
                 }
             }
             .buttonStyle(.plain)
@@ -268,11 +318,11 @@ struct NotchCustomizationSettingsView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .opacity(0.85)
             }
-            .foregroundColor(.black)
+            .foregroundColor(theme.inverseText)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(
-                RoundedRectangle(cornerRadius: 7).fill(Self.brandLime)
+                RoundedRectangle(cornerRadius: 7).fill(theme.doneColor)
             )
         }
         .buttonStyle(.plain)
@@ -294,22 +344,115 @@ struct NotchCustomizationSettingsView: View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(theme.mutedText)
                 .frame(width: 16)
             Text(label)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(theme.secondaryText)
             Spacer(minLength: 0)
             trailing()
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.03))
+            RoundedRectangle(cornerRadius: 7).fill(theme.overlay.opacity(0.12))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 7)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                .strokeBorder(theme.border.opacity(0.22), lineWidth: 0.5)
         )
+    }
+}
+
+// MARK: - Theme preview card
+
+/// One cell in the theme grid. Shows a miniature pill rendered in the
+/// target theme's palette: accent dot + status dot + "空闲" text + "×1"
+/// badge, matching the real notch's idle-state layout so the swatch
+/// communicates how the theme reads in situ. Selected cards glow in
+/// their own accent color (each theme announces itself).
+private struct ThemePreviewCard: View {
+    let themeID: NotchThemeID
+    let isSelected: Bool
+    let onTap: () -> Void
+    @State private var isHovered = false
+
+    private var palette: NotchPalette { NotchPalette.for(themeID) }
+    private var descriptor: ThemeDescriptor { ThemeRegistry.shared.descriptor(for: themeID) }
+    private var currentTheme: ThemeResolver { ThemeResolver(theme: NotchCustomizationStore.shared.customization.theme) }
+
+    private var idleLabel: String {
+        descriptor.previewIdleLabel(isChinese: L10n.isChinese)
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 10) {
+                // Mini pill preview — rounded capsule with the theme's bg,
+                // accent dot, a secondary status dot, status label, and
+                // "×1" badge. Same layout as the real notch's left wing
+                // at closed-state idle.
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(palette.bg)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(
+                                    palette.fg.opacity(0.08),
+                                    lineWidth: 0.5
+                                )
+                        )
+
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(palette.accent)
+                            .frame(width: 6, height: 6)
+                        Circle()
+                            .fill(palette.fg.opacity(0.82))
+                            .frame(width: 8, height: 8)
+                        Text(idleLabel)
+                            .font(.system(
+                                size: descriptor.prefersUppercasePreviewLabel ? 9 : 10,
+                                weight: descriptor.prefersUppercasePreviewLabel ? .bold : .medium,
+                                design: .monospaced
+                            ))
+                            .foregroundColor(palette.fg)
+                            .lineLimit(1)
+                            .textCase(descriptor.prefersUppercasePreviewLabel ? .uppercase : nil)
+                        Spacer(minLength: 4)
+                        Text("×1")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(palette.secondaryFg)
+                    }
+                    .padding(.horizontal, 10)
+                }
+                .frame(height: 28)
+
+                Text(L10n.notchThemeName(themeID))
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                    .foregroundColor(isSelected ? currentTheme.primaryText.opacity(0.95) : currentTheme.secondaryText)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected
+                          ? palette.accent.opacity(0.10)
+                          : (isHovered
+                             ? currentTheme.overlay.opacity(0.18)
+                             : currentTheme.overlay.opacity(0.08)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(
+                        isSelected ? palette.accent : currentTheme.border.opacity(0.22),
+                        lineWidth: isSelected ? 1.5 : 0.5
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel("\(L10n.notchThemeName(themeID)) theme")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
